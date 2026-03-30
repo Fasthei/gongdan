@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Segmented } from 'antd';
-import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
+import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar } from 'antd';
+import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined, PlusOutlined, GlobalOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../../api/axios';
@@ -65,7 +65,7 @@ export default function KnowledgeBaseChat() {
     }
 
     // 尝试拉取用户的历史会话列表
-    api.get('/knowledge-base/chat/sessions')
+    api.get('/knowledge-base/chat/sessions/list')
       .then(({ data }) => {
         if (Array.isArray(data)) {
           setChatHistoryList(data);
@@ -256,7 +256,7 @@ export default function KnowledgeBaseChat() {
                           {item.searchMode && (
                             <div style={{ marginTop: 8 }}>
                               <Tag bordered={false} color="default" style={{ fontSize: 12, borderRadius: 4 }}>
-                                {item.searchMode === 'hybrid' ? '检索来源: AI 搜索' : '检索来源: 仅内部'}
+                                {item.searchMode === 'hybrid' ? '检索来源: AI 搜索' : '检索来源: 内部知识库'}
                               </Tag>
                             </div>
                           )}
@@ -352,18 +352,24 @@ export default function KnowledgeBaseChat() {
                   }}
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'absolute', bottom: 8, left: 16, right: 8 }}>
-                  <Segmented<'internal' | 'hybrid'>
-                    value={searchMode}
-                    options={[
-                      { label: '仅内部', value: 'internal' },
-                      { label: 'AI 搜索', value: 'hybrid' },
-                    ]}
-                    onChange={(val) => {
-                      setSearchMode(val);
-                      localStorage.setItem('kb-chat-search-mode', val);
-                    }}
+                  <Button
+                    shape="round"
                     size="small"
-                  />
+                    icon={<GlobalOutlined />}
+                    onClick={() => {
+                      const next = searchMode === 'hybrid' ? 'internal' : 'hybrid';
+                      setSearchMode(next);
+                      localStorage.setItem('kb-chat-search-mode', next);
+                    }}
+                    style={{
+                      border: 'none',
+                      boxShadow: 'none',
+                      background: searchMode === 'hybrid' ? '#202124' : '#f1f3f4',
+                      color: searchMode === 'hybrid' ? '#fff' : '#5f6368',
+                    }}
+                  >
+                    AI 搜索
+                  </Button>
                   <Button 
                     type="primary" 
                     shape="circle" 
