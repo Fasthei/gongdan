@@ -60,6 +60,7 @@ export default function KnowledgeBaseChat() {
   const [requestExampleText, setRequestExampleText] = useState('');
   const [exampleFileList, setExampleFileList] = useState<UploadFile[]>([]);
   const [sandboxStatus, setSandboxStatus] = useState('');
+  const [retrievalStatus, setRetrievalStatus] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const [chatHistoryList, setChatHistoryList] = useState<any[]>([]);
@@ -154,6 +155,7 @@ export default function KnowledgeBaseChat() {
     setLoading(true);
     setAiSearchStreamText('');
     setSandboxStatus('');
+    setRetrievalStatus('');
     let acc = '';
     let roundMode: 'internal' | 'hybrid' = searchMode;
     let gotDone = false;
@@ -194,10 +196,79 @@ export default function KnowledgeBaseChat() {
         }
         throw new Error(errMsg);
       }
+      const ct = (res.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('text/html')) {
+        throw new Error(
+          '接口返回了 HTML（多为 SPA 首页）：请检查 Static Web App 是否将 /api 反代到 Nest 后端，或本地 Vite 代理是否保留 /api 前缀。',
+        );
+      }
       const reader = res.body?.getReader();
       if (!reader) throw new Error('无法读取流式响应');
       const dec = new TextDecoder();
       let buf = '';
+
+      const handleSsePayload = (raw: string) => {
+        if (!raw.trim()) return;
+        let json: any;
+        try {
+          json = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (json.type === 'session') {
+          if (json.sessionId) {
+            setSessionId(json.sessionId);
+            localStorage.setItem('kb-chat-session-id', json.sessionId);
+          }
+          if (json.usedSearchMode === 'hybrid' || json.usedSearchMode === 'internal') {
+            roundMode = json.usedSearchMode;
+            setUsedSearchMode(roundMode);
+          }
+        } else if (json.type === 'token' && json.source === 'llm' && typeof json.text === 'string') {
+          patchAssistant(acc + json.text);
+        } else if (json.type === 'ai_search_token' && typeof json.text === 'string') {
+          setAiSearchStreamText((s) => s + json.text);
+        } else if (json.type === 'status') {
+          if (json.phase === 'sandbox') {
+            setSandboxStatus(json.detail === 'start' ? '正在 Daytona 沙盒中复现请求…' : '沙盒执行完成');
+          } else if (json.phase === 'internal_kb') {
+            setRetrievalStatus(
+              json.detail === 'start' ? '正在检索内部知识库…' : '内部知识库检索完成',
+            );
+          } else if (json.phase === 'ai_search') {
+            setRetrievalStatus(
+              json.detail === 'start' ? '正在调用外部 AI 搜索…' : '外部 AI 搜索完成',
+            );
+          } else if (json.phase === 'ai_search_sse' && json.detail) {
+            setRetrievalStatus(`AI 搜索流: ${json.detail}`);
+          } else {
+            setRetrievalStatus(
+              [json.phase, json.detail, json.tool].filter(Boolean).join(' · ') || '检索中…',
+            );
+          }
+        } else if (json.type === 'meta') {
+          setSources(Array.isArray(json.sources) ? json.sources : []);
+          setFollowUps(Array.isArray(json.followUps) ? json.followUps : []);
+        } else if (json.type === 'done' && Array.isArray(json.messages)) {
+          gotDone = true;
+          setChat(json.messages as ChatItem[]);
+          localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
+        } else if (json.type === 'error') {
+          message.error(json.message || '流式对话出错');
+        }
+      };
+
+      const parseSseBlock = (block: string) => {
+        const lines = block.split('\n').map((l) => l.replace(/\r$/, ''));
+        const dataLines = lines.filter((l) => l.startsWith('data:'));
+        if (!dataLines.length) return;
+        const raw = dataLines
+          .map((l) => l.replace(/^data:\s?/i, '').trim())
+          .join('\n')
+          .trim();
+        handleSsePayload(raw);
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -205,42 +276,11 @@ export default function KnowledgeBaseChat() {
         const blocks = buf.split('\n\n');
         buf = blocks.pop() || '';
         for (const block of blocks) {
-          const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
-          if (!dataLine) continue;
-          const raw = dataLine.replace(/^data:\s*/i, '').trim();
-          if (!raw) continue;
-          let json: any;
-          try {
-            json = JSON.parse(raw);
-          } catch {
-            continue;
-          }
-          if (json.type === 'session') {
-            if (json.sessionId) {
-              setSessionId(json.sessionId);
-              localStorage.setItem('kb-chat-session-id', json.sessionId);
-            }
-            if (json.usedSearchMode === 'hybrid' || json.usedSearchMode === 'internal') {
-              roundMode = json.usedSearchMode;
-              setUsedSearchMode(roundMode);
-            }
-          } else if (json.type === 'token' && json.source === 'llm' && typeof json.text === 'string') {
-            patchAssistant(acc + json.text);
-          } else if (json.type === 'ai_search_token' && typeof json.text === 'string') {
-            setAiSearchStreamText((s) => s + json.text);
-          } else if (json.type === 'status' && json.phase === 'sandbox') {
-            setSandboxStatus(json.detail === 'start' ? '正在 Daytona 沙盒中复现请求…' : '沙盒执行完成');
-          } else if (json.type === 'meta') {
-            setSources(Array.isArray(json.sources) ? json.sources : []);
-            setFollowUps(Array.isArray(json.followUps) ? json.followUps : []);
-          } else if (json.type === 'done' && Array.isArray(json.messages)) {
-            gotDone = true;
-            setChat(json.messages as ChatItem[]);
-            localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
-          } else if (json.type === 'error') {
-            message.error(json.message || '流式对话出错');
-          }
+          parseSseBlock(block);
         }
+      }
+      if (buf.trim()) {
+        parseSseBlock(buf);
       }
       if (!gotDone) {
         setChat((prev) => {
@@ -439,14 +479,34 @@ export default function KnowledgeBaseChat() {
               </div>
 
               {/* Right Sidebar for Sources & Follow-ups */}
-              <div style={{ width: 300, flexShrink: 0, display: chat.length > 0 || loading || !!sandboxStatus ? 'block' : 'none' }}>
-                {(loading || aiSearchStreamText || sandboxStatus) && (
+              <div
+                style={{
+                  width: 300,
+                  flexShrink: 0,
+                  display:
+                    chat.length > 0 ||
+                    loading ||
+                    !!sandboxStatus ||
+                    !!retrievalStatus ||
+                    sources.length > 0 ||
+                    followUps.length > 0
+                      ? 'block'
+                      : 'none',
+                }}
+              >
+                {(loading || aiSearchStreamText || sandboxStatus || retrievalStatus) && (
                   <div style={{ marginBottom: 24, padding: 16, background: '#f8f9fa', borderRadius: 12 }}>
                     <Text strong style={{ display: 'block', marginBottom: 12 }}>思考状态</Text>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
                       {sandboxStatus ? (
                         <Text type="secondary" style={{ fontSize: 13 }}>
                           <Spin size="small" style={{ marginRight: 8 }} /> {sandboxStatus}
+                        </Text>
+                      ) : null}
+                      {retrievalStatus ? (
+                        <Text type="secondary" style={{ fontSize: 13 }}>
+                          {loading ? <Spin size="small" style={{ marginRight: 8 }} /> : null}
+                          {retrievalStatus}
                         </Text>
                       ) : null}
                       <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 分析问题中...</Text>

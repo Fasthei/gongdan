@@ -147,6 +147,11 @@ export class KnowledgeBaseController {
     res.setHeader('X-Accel-Buffering', 'no');
     (res as any).flushHeaders?.();
 
+    const flush = () => {
+      const r = res as any;
+      if (typeof r.flush === 'function') r.flush();
+    };
+
     try {
       for await (const chunk of this.kbService.chatStream({
         sessionId: body.sessionId,
@@ -159,6 +164,7 @@ export class KnowledgeBaseController {
         requestExample: body.requestExample?.trim(),
       })) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        flush();
       }
     } catch (e: any) {
       res.write(`data: ${JSON.stringify({ type: 'error', message: e?.message || '流式输出失败' })}\n\n`);
