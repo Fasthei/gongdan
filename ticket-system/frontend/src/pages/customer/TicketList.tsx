@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Typography, Card, Select } from 'antd';
-import { PlusOutlined } from '@ant-design/icons';
+import { PlusOutlined, MessageOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import dayjs from 'dayjs';
@@ -76,6 +76,9 @@ export default function CustomerTicketList() {
             </Select>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/tickets/new')}>
               提交工单
+            </Button>
+            <Button icon={<MessageOutlined />} onClick={() => navigate('/kb-chat')}>
+              知识库对话
             </Button>
           </Space>
         </Space>

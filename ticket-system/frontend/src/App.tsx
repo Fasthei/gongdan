@@ -13,6 +13,7 @@ const CustomerTicketDetail = React.lazy(() => import('./pages/customer/TicketDet
 const CustomerCreateTicket = React.lazy(() => import('./pages/customer/CreateTicket'));
 const OperatorDashboard = React.lazy(() => import('./pages/operator/Dashboard'));
 const EngineerDashboard = React.lazy(() => import('./pages/engineer/Dashboard'));
+const KnowledgeBaseChat = React.lazy(() => import('./pages/common/KnowledgeBaseChat'));
 
 function App() {
   return (
@@ -36,6 +37,9 @@ function App() {
 
               {/* 工程师路由 */}
               <Route path="/engineer/*" element={<PrivateRoute roles={['ENGINEER', 'ADMIN']}><EngineerDashboard /></PrivateRoute>} />
+
+              {/* 全角色知识库对话 */}
+              <Route path="/kb-chat" element={<PrivateRoute roles={['CUSTOMER', 'OPERATOR', 'ENGINEER', 'ADMIN']}><KnowledgeBaseChat /></PrivateRoute>} />
 
               <Route path="/unauthorized" element={<div style={{ padding: 40 }}>无权访问此页面</div>} />
               <Route path="*" element={<Navigate to="/login" replace />} />

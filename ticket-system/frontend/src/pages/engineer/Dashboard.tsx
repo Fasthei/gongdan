@@ -31,6 +31,7 @@ export default function EngineerDashboard() {
   const menuItems = [
     { key: '/engineer', icon: <UnorderedListOutlined />, label: <Link to="/engineer">我的工单</Link> },
     { key: '/engineer/settings', icon: <SettingOutlined />, label: <Link to="/engineer/settings">设置</Link> },
+    { key: '/kb-chat', icon: <SettingOutlined />, label: <Link to="/kb-chat">知识库对话</Link> },
     ...(user?.role === 'ADMIN'
       ? [{ key: '/engineer/admin', icon: <SettingOutlined />, label: <Link to="/engineer/admin">管理员账户管理</Link> }]
       : []),

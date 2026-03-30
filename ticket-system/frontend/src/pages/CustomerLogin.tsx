@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Form, Input, Button, Alert, Typography } from 'antd';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,8 +9,19 @@ const { Title, Text } = Typography;
 export default function CustomerLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [bgUrl, setBgUrl] = useState('');
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+    api.get('/public/bing-background')
+      .then(({ data }) => {
+        if (active) setBgUrl(data?.imageUrl || '');
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const onFinish = async ({ customerCode }: { customerCode: string }) => {
     setLoading(true);
@@ -27,7 +38,17 @@ export default function CustomerLogin() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f5' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: bgUrl
+          ? `linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)), url(${bgUrl}) center/cover no-repeat`
+          : '#f0f2f5',
+      }}
+    >
       <Card style={{ width: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <Title level={3} style={{ margin: 0 }}>技术支持工单系统</Title>

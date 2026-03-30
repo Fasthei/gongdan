@@ -84,7 +84,7 @@ export class KnowledgeBaseService {
   /**
    * AI 智能问答，返回答案 + 来源文档
    */
-  async smartQuery(question: string, topK = 5): Promise<KBSmartQueryResult> {
+  async smartQuery(question: string, topK = 5, history?: Array<{ role: 'user' | 'assistant'; content: string }>): Promise<KBSmartQueryResult> {
     if (!this.apiKey) {
       this.logger.debug(`[Mock KB Smart] 问题: "${question}"`);
       return { answer: '', sources: [] };
@@ -93,7 +93,7 @@ export class KnowledgeBaseService {
     try {
       const { data } = await axios.post(
         `${this.baseUrl}/api/v1/smart-query`,
-        { question, top: topK },
+        { question, top: topK, history: history || [] },
         { headers: this.headers, timeout: 15000 },
       );
 
