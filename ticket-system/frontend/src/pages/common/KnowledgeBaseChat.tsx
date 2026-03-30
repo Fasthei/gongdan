@@ -16,6 +16,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../../api/axios';
+import { apiUrl } from '../../config/apiBase';
 import { useAuth } from '../../contexts/AuthContext';
 
 const { TextArea } = Input;
@@ -120,7 +121,7 @@ export default function KnowledgeBaseChat() {
     if (res.status === 401) {
       const rt = localStorage.getItem('refreshToken');
       if (rt) {
-        const rr = await fetch('/api/auth/refresh', {
+        const rr = await fetch(apiUrl('/api/auth/refresh'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: rt }),
@@ -173,7 +174,7 @@ export default function KnowledgeBaseChat() {
     };
 
     try {
-      const res = await fetchWithAuthStream('/api/knowledge-base/chat/stream', {
+      const res = await fetchWithAuthStream(apiUrl('/api/knowledge-base/chat/stream'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -187,12 +188,14 @@ export default function KnowledgeBaseChat() {
         }),
       });
       if (!res.ok) {
-        let errMsg = '知识库对话失败';
+        const status = res.status;
+        const text = await res.text().catch(() => '');
+        let errMsg = `知识库对话失败（HTTP ${status}）`;
         try {
-          const j = await res.json();
-          errMsg = j.message || errMsg;
+          const j = JSON.parse(text);
+          if (j?.message) errMsg = `${errMsg} ${j.message}`;
         } catch {
-          /* ignore */
+          if (text?.trim()) errMsg = `${errMsg} ${text.trim().slice(0, 280)}`;
         }
         throw new Error(errMsg);
       }
