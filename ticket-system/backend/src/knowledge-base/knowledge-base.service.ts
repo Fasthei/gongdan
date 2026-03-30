@@ -524,7 +524,10 @@ export class KnowledgeBaseService {
         output = extractAgentAnswerText(res);
       } catch (err2: any) {
         this.logger.error(`回退模型调用失败: ${err2?.message}`, err2?.stack);
-        throw err2;
+        // 主备模型都失败时不要中断接口，降级为内部知识库直答，避免前端再次提问直接报错。
+        const degraded = await this.smartQuery(question, 5, historyForKb);
+        dedupeSource(degraded.sources || []);
+        output = degraded.answer || '';
       }
     }
 
