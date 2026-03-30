@@ -1,0 +1,44 @@
+name: Backend Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ticket-system/backend/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ticket-system/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ticket-system/backend/package-lock.json
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run build
+
+      - name: Package for deployment
+        run: |
+          cp -r dist ../deploy
+          cp package.json package-lock.json ../deploy/
+          cp -r prisma ../deploy/prisma
+          cd ../deploy
+          npm ci --omit=dev
+          npx prisma generate
+          zip -r ../backend.zip .
+
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: gongdan
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ticket-system/backend.zip
