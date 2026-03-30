@@ -15,19 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Build and Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
         with:
-          node-version: 20
-
-      - name: Install and Build
-        working-directory: ticket-system/frontend
-        run: |
-          npm install
-          npm run build
-
-      - name: Install SWA CLI and Deploy
-        env:
-          SWA_CLI_DEPLOYMENT_TOKEN: ${{ secrets.AZURE_SWA_TOKEN }}
-        run: |
-          npm install -g @azure/static-web-apps-cli
-          swa deploy ticket-system/frontend/dist --env production
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          app_location: ticket-system/frontend
+          api_location: ''
+          output_location: dist
