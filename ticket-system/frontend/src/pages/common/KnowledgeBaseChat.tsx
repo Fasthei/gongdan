@@ -354,7 +354,7 @@ export default function KnowledgeBaseChat() {
           </div>
         </div>
       ) : (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
           {/* Left Sidebar for Chat History */}
           <div style={{ width: 260, borderRight: '1px solid #f0f0f0', background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '16px', borderBottom: '1px solid #f0f0f0' }}>
@@ -410,13 +410,43 @@ export default function KnowledgeBaseChat() {
             </div>
           </div>
 
-          {/* Main Chat Area */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-            {/* Messages Area */}
-            <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth', overflowX: 'hidden' }}>
-            <div style={{ display: 'flex', maxWidth: 1200, margin: '0 auto', gap: 24, padding: '0 24px' }}>
-              {/* Main Chat Stream */}
-              <div style={{ flex: 1, maxWidth: 800 }}>
+          {/* Main Chat Area：仅左侧消息区滚动，右侧参考资料/追问固定在同一视口内独立滚动 */}
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              minHeight: 0,
+            }}
+          >
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'row',
+                gap: 24,
+                padding: '0 24px',
+                minHeight: 0,
+                maxWidth: 1200,
+                width: '100%',
+                margin: '0 auto',
+                alignItems: 'stretch',
+              }}
+            >
+              {/* Main Chat Stream — 仅此列纵向滚动 */}
+              <div
+                ref={messagesRef}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  maxWidth: 800,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  padding: '24px 0',
+                  scrollBehavior: 'smooth',
+                }}
+              >
                 {sandboxMode && requestExampleText.trim() ? (
                   <div style={{ marginBottom: 12, padding: '8px 12px', background: '#e8f5e9', borderRadius: 8, fontSize: 12, color: '#2e7d32' }}>
                     沙盒排错已启用，已载入请求示例（{requestExampleText.length} 字符）。发送问题时将自动复现并结合知识库/模型检索排错。
@@ -436,10 +466,10 @@ export default function KnowledgeBaseChat() {
                       <div style={{ width: '100%', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                         <Avatar
                           icon={item.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                          style={{ 
-                            background: item.role === 'user' ? '#1a73e8' : '#10a37f', 
+                          style={{
+                            background: item.role === 'user' ? '#1a73e8' : '#10a37f',
                             flex: '0 0 auto',
-                            marginTop: 4
+                            marginTop: 4,
                           }}
                         />
                         <div style={{ width: '100%', overflow: 'hidden' }}>
@@ -469,20 +499,24 @@ export default function KnowledgeBaseChat() {
                   chat.length > 0 &&
                   chat[chat.length - 1]?.role === 'assistant' &&
                   !chat[chat.length - 1]?.content && (
-                  <div style={{ padding: '16px 0', display: 'flex', gap: 16 }}>
-                    <Avatar icon={<RobotOutlined />} style={{ background: '#10a37f', flex: '0 0 auto' }} />
-                    <div style={{ paddingTop: 6 }}>
-                      <Spin size="small" /> <Text type="secondary" style={{ marginLeft: 8 }}>正在思考并检索...</Text>
+                    <div style={{ padding: '16px 0', display: 'flex', gap: 16 }}>
+                      <Avatar icon={<RobotOutlined />} style={{ background: '#10a37f', flex: '0 0 auto' }} />
+                      <div style={{ paddingTop: 6 }}>
+                        <Spin size="small" /> <Text type="secondary" style={{ marginLeft: 8 }}>正在思考并检索...</Text>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
               </div>
 
-              {/* Right Sidebar for Sources & Follow-ups */}
+              {/* Right Sidebar — 与左侧同高，内容多时在侧栏内滚动，不随对话滚动上移 */}
               <div
                 style={{
                   width: 300,
                   flexShrink: 0,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  padding: '24px 0',
                   display:
                     chat.length > 0 ||
                     loading ||
@@ -557,9 +591,8 @@ export default function KnowledgeBaseChat() {
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Input Area */}
+          {/* Input Area（与上方消息区同属主列，不单独随左侧滚动） */}
           <div style={{ padding: '0 24px 24px', background: 'linear-gradient(180deg, rgba(255,255,255,0) 0%, #fff 20%)' }}>
             <div style={{ maxWidth: 800, margin: '0 auto', marginLeft: 'calc(50% - 600px + 24px)', '@media (max-width: 1200px)': { marginLeft: 'auto' } } as any}>
               <div style={{ 
