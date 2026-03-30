@@ -586,6 +586,25 @@ export class KnowledgeBaseService {
     return this.aiSearch(query);
   }
 
+  /** 混合模式写入 system prompt，供模型综合（避免仅靠工具调用时模型跳过外部检索） */
+  private formatHybridFactsForPrompt(
+    intRes: KBSmartQueryResult,
+    extRes: { answer: string; sources: KBSearchResult[] },
+  ): string {
+    const cap = (s: string, n = 4000) => (s.length > n ? `${s.slice(0, n)}…` : s || '（无）');
+    const titles = (items: KBSearchResult[], m = 8) =>
+      (items || []).slice(0, m).map((r) => r.title || r.id).filter(Boolean).join('；') || '无';
+    return [
+      '### 内部知识库',
+      cap(intRes.answer || ''),
+      `来源标题：${titles(intRes.sources)}`,
+      '',
+      '### 外部 AI 搜索',
+      cap(extRes.answer || ''),
+      `来源标题：${titles(extRes.sources)}`,
+    ].join('\n');
+  }
+
   private async *streamChatWithAgent(params: {
     question: string;
     history: KBChatMessage[];
@@ -628,42 +647,50 @@ export class KnowledgeBaseService {
           schema: z.object({ question: z.string() }),
         },
       );
-
-      const externalTool = tool(
-        async ({ query }: { query: string }) => {
-          if (usedSearchMode !== 'hybrid') {
-            return JSON.stringify({ disabled: true, reason: 'external search disabled by searchMode' });
-          }
-          q.push({ type: 'status', phase: 'ai_search', detail: 'start', tool: 'external_ai_search' });
-          const res = await this.aiSearchWithOptionalSse(query, q);
-          dedupeSource(res.sources || []);
-          if (Array.isArray(res.followUps) && res.followUps.length > 0) followUps.splice(0, followUps.length, ...res.followUps);
-          if (typeof res.confidence === 'number') confidence = res.confidence;
-          q.push({ type: 'status', phase: 'ai_search', detail: 'done', tool: 'external_ai_search' });
-          return JSON.stringify({
-            answer: res.answer || '',
-            sources: (res.sources || []).slice(0, 8),
-            followUps: res.followUps || [],
-            confidence: res.confidence,
-          });
-        },
-        {
-          name: 'external_ai_search',
-          description: '调用外部AI搜索（PydanticAI Agent）获取补充答案与追问',
-          schema: z.object({ query: z.string() }),
-        },
-      );
-
-      return usedSearchMode === 'hybrid' ? [internalTool, externalTool] : [internalTool];
+      return [internalTool];
     };
 
-    const systemPrompt = [
-      '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
-      `当前检索模式: ${usedSearchMode}`,
-      '当模式为 internal 时，禁止使用 external_ai_search。',
-      '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
-      '不要原样复读工具JSON，要整理成可读答案。',
-    ].join('\n');
+    let toolsArr: ReturnType<typeof mkTools> | any[] = [];
+    let systemPrompt: string;
+
+    if (usedSearchMode === 'hybrid') {
+      sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'start', tool: 'internal_kb_search' });
+      const intRes = await this.smartQuery(question, 5, historyForKb);
+      dedupeSource(intRes.sources || []);
+      sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'done', tool: 'internal_kb_search' });
+
+      sideQueue.push({ type: 'status', phase: 'ai_search', detail: 'start', tool: 'external_ai_search' });
+      const extRes = await this.aiSearchWithOptionalSse(question, sideQueue);
+      dedupeSource(extRes.sources || []);
+      if (Array.isArray(extRes.followUps) && extRes.followUps.length > 0) {
+        followUps.splice(0, followUps.length, ...extRes.followUps);
+      }
+      if (typeof extRes.confidence === 'number') confidence = extRes.confidence;
+      if (!extRes.answer?.trim() && (!extRes.sources || extRes.sources.length === 0)) {
+        this.logger.warn(
+          '混合模式流式：外部 AI 搜索无有效答案与来源，请检查 AI_SEARCH_AGENT_URL、出网与 AISousuo 可用性',
+        );
+      }
+      sideQueue.push({ type: 'status', phase: 'ai_search', detail: 'done', tool: 'external_ai_search' });
+
+      const facts = this.formatHybridFactsForPrompt(intRes, extRes);
+      toolsArr = [];
+      systemPrompt = [
+        '你是工单系统知识库助手。系统已自动完成「内部知识库」与「外部 AI 搜索」；下列【检索事实】为唯一依据，请综合回答用户，不得编造。',
+        '输出中文：先给结论；区分内部要点与外部补充；若某一侧无有效内容要如实说明。',
+        '不要原样复读长段 JSON。',
+        '\n【检索事实】\n',
+        facts,
+      ].join('\n');
+    } else {
+      toolsArr = mkTools(sideQueue);
+      systemPrompt = [
+        '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
+        `当前检索模式: ${usedSearchMode}`,
+        '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
+        '不要原样复读工具JSON，要整理成可读答案。',
+      ].join('\n');
+    }
 
     const userContent = [
       `历史对话（最近10轮）:\n${historyChat.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
@@ -673,7 +700,6 @@ export class KnowledgeBaseService {
     const runOneModel = async function* (
       this: KnowledgeBaseService,
       modelName: string,
-      toolsArr: ReturnType<typeof mkTools>,
       q: KbSideQueue,
     ): AsyncGenerator<KbStreamPayload> {
       const llm = this.createAgentModel(modelName, true);
@@ -707,10 +733,8 @@ export class KnowledgeBaseService {
       }
     };
 
-    const toolsPrimary = mkTools(sideQueue);
-
     try {
-      yield* runOneModel.call(this, this.llmPrimaryModel, toolsPrimary, sideQueue);
+      yield* runOneModel.call(this, this.llmPrimaryModel, sideQueue);
     } catch (err: any) {
       const msg = String(err?.message || '');
       this.logger.warn(`主模型流式调用失败: ${msg}`);
@@ -723,9 +747,8 @@ export class KnowledgeBaseService {
         yield { type: 'token', text, source: 'llm' };
       } else {
         const q2 = new KbSideQueue();
-        const toolsFb = mkTools(q2);
         try {
-          yield* runOneModel.call(this, this.llmFallbackModel, toolsFb, q2);
+          yield* runOneModel.call(this, this.llmFallbackModel, q2);
         } catch (err2: any) {
           this.logger.error(`回退模型流式失败: ${err2?.message}`, err2?.stack);
           const degraded = await this.smartQuery(question, 5, historyForKb);
@@ -847,64 +870,65 @@ export class KnowledgeBaseService {
       }
     };
 
-    const internalTool = tool(
-      async ({ question: q }: { question: string }) => {
-        const res = await this.smartQuery(q, 5, historyForKb);
-        dedupeSource(res.sources || []);
-        return JSON.stringify({
-          answer: res.answer || '',
-          sources: (res.sources || []).slice(0, 8),
-        });
-      },
-      {
-        name: 'internal_kb_search',
-        description: '查询内部知识库并返回答案与来源文档',
-        schema: z.object({
-          question: z.string(),
-        }),
-      },
-    );
+    let tools: any[];
+    let systemPrompt: string;
 
-    const externalTool = tool(
-      async ({ query }: { query: string }) => {
-        if (searchMode !== 'hybrid') {
+    if (searchMode === 'hybrid') {
+      const noopQ = new KbSideQueue();
+      const intRes = await this.smartQuery(question, 5, historyForKb);
+      dedupeSource(intRes.sources || []);
+      let extRes: { answer: string; sources: KBSearchResult[]; followUps: string[]; confidence?: number };
+      try {
+        extRes = await this.aiSearchWithOptionalSse(question, noopQ);
+      } finally {
+        noopQ.close();
+      }
+      dedupeSource(extRes.sources || []);
+      if (Array.isArray(extRes.followUps) && extRes.followUps.length > 0) {
+        followUps = extRes.followUps;
+      }
+      if (typeof extRes.confidence === 'number') {
+        confidence = extRes.confidence;
+      }
+      if (!extRes.answer?.trim() && (!extRes.sources || extRes.sources.length === 0)) {
+        this.logger.warn(
+          '混合模式（同步）：外部 AI 搜索无有效答案与来源，请检查 AI_SEARCH_AGENT_URL 与出网',
+        );
+      }
+      tools = [];
+      systemPrompt = [
+        '你是工单系统知识库助手。系统已自动完成内部与外部检索；下列【检索事实】为唯一依据，请综合回答，不得编造。',
+        '输出中文，先结论后依据；区分内部与外部补充；某一侧无内容要说明。',
+        '不要原样复读长段 JSON。',
+        '\n【检索事实】\n',
+        this.formatHybridFactsForPrompt(intRes, extRes),
+      ].join('\n');
+    } else {
+      const internalTool = tool(
+        async ({ question: q }: { question: string }) => {
+          const res = await this.smartQuery(q, 5, historyForKb);
+          dedupeSource(res.sources || []);
           return JSON.stringify({
-            disabled: true,
-            reason: 'external search disabled by searchMode',
+            answer: res.answer || '',
+            sources: (res.sources || []).slice(0, 8),
           });
-        }
-        const res = await this.aiSearch(query);
-        dedupeSource(res.sources || []);
-        if (Array.isArray(res.followUps) && res.followUps.length > 0) {
-          followUps = res.followUps;
-        }
-        if (typeof res.confidence === 'number') {
-          confidence = res.confidence;
-        }
-        return JSON.stringify({
-          answer: res.answer || '',
-          sources: (res.sources || []).slice(0, 8),
-          followUps: res.followUps || [],
-          confidence: res.confidence,
-        });
-      },
-      {
-        name: 'external_ai_search',
-        description: '调用外部AI搜索（PydanticAI Agent）获取补充答案与追问',
-        schema: z.object({
-          query: z.string(),
-        }),
-      },
-    );
-
-    const tools = searchMode === 'hybrid' ? [internalTool, externalTool] : [internalTool];
-    const systemPrompt = [
-      '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
-      `当前检索模式: ${searchMode}`,
-      '当模式为 internal 时，禁止使用 external_ai_search。',
-      '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
-      '不要原样复读工具JSON，要整理成可读答案。',
-    ].join('\n');
+        },
+        {
+          name: 'internal_kb_search',
+          description: '查询内部知识库并返回答案与来源文档',
+          schema: z.object({
+            question: z.string(),
+          }),
+        },
+      );
+      tools = [internalTool];
+      systemPrompt = [
+        '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
+        `当前检索模式: ${searchMode}`,
+        '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
+        '不要原样复读工具JSON，要整理成可读答案。',
+      ].join('\n');
+    }
 
     const invokeAgentWithModel = async (modelName: string) => {
       const llm = this.createAgentModel(modelName);
