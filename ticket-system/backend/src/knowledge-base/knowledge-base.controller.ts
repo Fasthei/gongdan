@@ -69,11 +69,13 @@ export class KnowledgeBaseController {
   @Post('chat')
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
   async chat(
-    @Body() body: {
+    @Body()     body: {
       sessionId?: string;
       message: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
+      useSandbox?: boolean;
+      requestExample?: string;
     },
     @Request() req: any,
   ) {
@@ -99,6 +101,8 @@ export class KnowledgeBaseController {
       customerCode: body.customerCode,
       message: body.message.trim(),
       searchMode: body.searchMode,
+      useSandbox: body.useSandbox,
+      requestExample: body.requestExample?.trim(),
     });
   }
 
@@ -112,6 +116,8 @@ export class KnowledgeBaseController {
       message: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
+      useSandbox?: boolean;
+      requestExample?: string;
     },
     @Req() req: any,
     @Res({ passthrough: false }) res: Response,
@@ -149,6 +155,8 @@ export class KnowledgeBaseController {
         customerCode: body.customerCode,
         message: body.message.trim(),
         searchMode: body.searchMode,
+        useSandbox: body.useSandbox,
+        requestExample: body.requestExample?.trim(),
       })) {
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }

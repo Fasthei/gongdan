@@ -1,6 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar } from 'antd';
-import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined, PlusOutlined, GlobalOutlined } from '@ant-design/icons';
+import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload } from 'antd';
+import type { UploadFile } from 'antd/es/upload/interface';
+import {
+  RobotOutlined,
+  UserOutlined,
+  SendOutlined,
+  ReloadOutlined,
+  ArrowLeftOutlined,
+  PlusOutlined,
+  GlobalOutlined,
+  CodeOutlined,
+  CopyOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../../api/axios';
@@ -8,6 +20,15 @@ import { useAuth } from '../../contexts/AuthContext';
 
 const { TextArea } = Input;
 const { Title, Text } = Typography;
+
+const CURL_EXAMPLE_TEMPLATE = `#!/usr/bin/env bash
+# 将下方 URL / Header / Body 换成客户的真实请求后，可在沙盒中复现
+set -e
+curl -sS -w "\\nHTTP_CODE:%{http_code}\\n" -X POST "https://api.example.com/v1/resource" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer <token>" \\
+  -d '{"key":"value"}'
+`;
 
 type ChatItem = { role: 'user' | 'assistant'; content: string; searchMode?: 'internal' | 'hybrid' };
 
@@ -34,6 +55,11 @@ export default function KnowledgeBaseChat() {
     return v === 'hybrid' ? 'hybrid' : 'internal';
   });
   const [usedSearchMode, setUsedSearchMode] = useState<'internal' | 'hybrid'>('internal');
+  const [sandboxMode, setSandboxMode] = useState(() => localStorage.getItem('kb-sandbox-mode') === '1');
+  const [exampleModalOpen, setExampleModalOpen] = useState(false);
+  const [requestExampleText, setRequestExampleText] = useState('');
+  const [exampleFileList, setExampleFileList] = useState<UploadFile[]>([]);
+  const [sandboxStatus, setSandboxStatus] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const [chatHistoryList, setChatHistoryList] = useState<any[]>([]);
@@ -113,6 +139,11 @@ export default function KnowledgeBaseChat() {
   const ask = async () => {
     if (!question.trim()) return;
     if (!canAsk) return message.warning('客户请先输入并确认客户编号');
+    if (sandboxMode && !requestExampleText.trim()) {
+      message.warning('已开启沙盒排错：请先打开「请求示例」，粘贴或上传客户请求脚本');
+      setExampleModalOpen(true);
+      return;
+    }
 
     const userMsg: ChatItem = { role: 'user', content: question.trim(), searchMode };
     const placeholderAssistant: ChatItem = { role: 'assistant', content: '', searchMode };
@@ -122,6 +153,7 @@ export default function KnowledgeBaseChat() {
     setQuestion('');
     setLoading(true);
     setAiSearchStreamText('');
+    setSandboxStatus('');
     let acc = '';
     let roundMode: 'internal' | 'hybrid' = searchMode;
     let gotDone = false;
@@ -146,6 +178,9 @@ export default function KnowledgeBaseChat() {
           sessionId: sessionId || undefined,
           message: userMsg.content,
           searchMode,
+          ...(sandboxMode && requestExampleText.trim()
+            ? { useSandbox: true, requestExample: requestExampleText.trim() }
+            : {}),
           ...(isCustomer ? { customerCode: verifiedCode } : {}),
         }),
       });
@@ -193,6 +228,8 @@ export default function KnowledgeBaseChat() {
             patchAssistant(acc + json.text);
           } else if (json.type === 'ai_search_token' && typeof json.text === 'string') {
             setAiSearchStreamText((s) => s + json.text);
+          } else if (json.type === 'status' && json.phase === 'sandbox') {
+            setSandboxStatus(json.detail === 'start' ? '正在 Daytona 沙盒中复现请求…' : '沙盒执行完成');
           } else if (json.type === 'meta') {
             setSources(Array.isArray(json.sources) ? json.sources : []);
             setFollowUps(Array.isArray(json.followUps) ? json.followUps : []);
@@ -340,6 +377,11 @@ export default function KnowledgeBaseChat() {
             <div style={{ display: 'flex', maxWidth: 1200, margin: '0 auto', gap: 24, padding: '0 24px' }}>
               {/* Main Chat Stream */}
               <div style={{ flex: 1, maxWidth: 800 }}>
+                {sandboxMode && requestExampleText.trim() ? (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', background: '#e8f5e9', borderRadius: 8, fontSize: 12, color: '#2e7d32' }}>
+                    沙盒排错已启用，已载入请求示例（{requestExampleText.length} 字符）。发送问题时将自动复现并结合知识库/模型检索排错。
+                  </div>
+                ) : null}
                 {chat.length === 0 && !loading && (
                   <div style={{ textAlign: 'center', marginTop: '10vh', color: '#8e8e8e' }}>
                     <RobotOutlined style={{ fontSize: 48, marginBottom: 16, opacity: 0.2 }} />
@@ -397,11 +439,16 @@ export default function KnowledgeBaseChat() {
               </div>
 
               {/* Right Sidebar for Sources & Follow-ups */}
-              <div style={{ width: 300, flexShrink: 0, display: chat.length > 0 || loading ? 'block' : 'none' }}>
-                {(loading || aiSearchStreamText) && (
+              <div style={{ width: 300, flexShrink: 0, display: chat.length > 0 || loading || !!sandboxStatus ? 'block' : 'none' }}>
+                {(loading || aiSearchStreamText || sandboxStatus) && (
                   <div style={{ marginBottom: 24, padding: 16, background: '#f8f9fa', borderRadius: 12 }}>
                     <Text strong style={{ display: 'block', marginBottom: 12 }}>思考状态</Text>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      {sandboxStatus ? (
+                        <Text type="secondary" style={{ fontSize: 13 }}>
+                          <Spin size="small" style={{ marginRight: 8 }} /> {sandboxStatus}
+                        </Text>
+                      ) : null}
                       <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 分析问题中...</Text>
                       {usedSearchMode === 'hybrid' && <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 调用 AI 搜索 Agent...</Text>}
                       <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 检索内部知识库...</Text>
@@ -478,7 +525,8 @@ export default function KnowledgeBaseChat() {
                     }
                   }}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'absolute', bottom: 8, left: 16, right: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'absolute', bottom: 8, left: 16, right: 8, flexWrap: 'wrap', gap: 8 }}>
+                  <Space size={8} wrap>
                   <Button
                     shape="round"
                     size="small"
@@ -497,6 +545,37 @@ export default function KnowledgeBaseChat() {
                   >
                     AI 搜索
                   </Button>
+                  <Button
+                    shape="round"
+                    size="small"
+                    icon={<CodeOutlined />}
+                    onClick={() => {
+                      const next = !sandboxMode;
+                      setSandboxMode(next);
+                      localStorage.setItem('kb-sandbox-mode', next ? '1' : '0');
+                      if (!next) {
+                        setRequestExampleText('');
+                        setExampleFileList([]);
+                      }
+                    }}
+                    style={{
+                      border: 'none',
+                      boxShadow: 'none',
+                      background: sandboxMode ? '#0d47a1' : '#f1f3f4',
+                      color: sandboxMode ? '#fff' : '#5f6368',
+                    }}
+                  >
+                    沙盒
+                  </Button>
+                  <Button
+                    shape="round"
+                    size="small"
+                    disabled={!sandboxMode}
+                    onClick={() => setExampleModalOpen(true)}
+                  >
+                    请求示例
+                  </Button>
+                  </Space>
                   <Button 
                     type="primary" 
                     shape="circle" 
@@ -517,6 +596,90 @@ export default function KnowledgeBaseChat() {
           </div>
         </div>
       )}
+
+      <Modal
+        title="客户请求示例（Daytona 沙盒）"
+        open={exampleModalOpen}
+        onCancel={() => setExampleModalOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setExampleModalOpen(false)}>关闭</Button>,
+          <Button
+            key="ok"
+            type="primary"
+            disabled={!sandboxMode}
+            onClick={() => {
+              if (!sandboxMode) {
+                message.warning('请先点击「沙盒」开启沙盒排错');
+                return;
+              }
+              if (!requestExampleText.trim()) {
+                message.warning('请粘贴或上传请求脚本');
+                return;
+              }
+              setExampleModalOpen(false);
+              message.success('已保存请求示例，发送消息时将带入沙盒执行');
+            }}
+          >
+            保存并关闭
+          </Button>,
+        ]}
+        width={720}
+        destroyOnClose={false}
+      >
+        {!sandboxMode ? (
+          <Text type="warning">请先在大输入框左下角开启「沙盒」，才能上传或粘贴请求示例（与 AI 搜索开关独立）。</Text>
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <Space>
+              <Button
+                icon={<CopyOutlined />}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(CURL_EXAMPLE_TEMPLATE);
+                    message.success('已复制 curl 示例模板');
+                  } catch {
+                    message.error('复制失败，请手动选择模板文本');
+                  }
+                }}
+              >
+                复制请求示例模板
+              </Button>
+              <Upload
+                accept=".sh,.bash,.txt,.http,.json"
+                maxCount={1}
+                fileList={exampleFileList}
+                disabled={!sandboxMode}
+                beforeUpload={(file) => {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    setRequestExampleText(String(reader.result || ''));
+                    setExampleFileList([{ uid: file.uid, name: file.name, status: 'done' }]);
+                    message.success('已读取文件');
+                  };
+                  reader.readAsText(file as Blob);
+                  return false;
+                }}
+                onRemove={() => {
+                  setExampleFileList([]);
+                  return true;
+                }}
+              >
+                <Button icon={<UploadOutlined />} disabled={!sandboxMode}>上传文件</Button>
+              </Upload>
+            </Space>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              内容将作为 <code>bash /tmp/request.sh</code> 在 Daytona 隔离环境中执行。请使用可执行的 shell（含 curl / wget 等），勿包含交互式命令。
+            </Text>
+            <TextArea
+              rows={14}
+              value={requestExampleText}
+              onChange={(e) => setRequestExampleText(e.target.value)}
+              placeholder="粘贴客户的 curl、shell 脚本或 HTTP 草稿…"
+              disabled={!sandboxMode}
+            />
+          </Space>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -587,6 +587,59 @@ export class KnowledgeBaseService {
   }
 
   /** 混合模式写入 system prompt，供模型综合（避免仅靠工具调用时模型跳过外部检索） */
+  /** 在 Daytona 中执行客户提供的 shell/curl 片段，用于隔离复现 HTTP/CLI 请求 */
+  private async runSandboxRequestExample(script: string): Promise<string> {
+    const apiKey = this.config.get<string>('DAYTONA_API_KEY')?.trim();
+    const apiUrl = this.config.get<string>('DAYTONA_API_URL')?.trim() || 'https://app.daytona.io/api';
+    const target = (this.config.get<string>('DAYTONA_TARGET')?.trim() as 'us' | 'eu') || 'us';
+    if (!apiKey) {
+      throw new Error('未配置 DAYTONA_API_KEY，无法使用沙盒排错');
+    }
+    const maxScript = 32000;
+    const capped =
+      script.length > maxScript ? `${script.slice(0, maxScript)}\n# ... [脚本已截断]` : script;
+    const { DaytonaSandbox } = await import('@langchain/daytona');
+    const sb = await DaytonaSandbox.create({
+      language: 'javascript',
+      timeout: 180,
+      target,
+      labels: { app: 'ticket-kb-troubleshoot' },
+      auth: { apiKey, apiUrl },
+      initialFiles: { '/tmp/request.sh': capped },
+    });
+    try {
+      await sb.execute('chmod +x /tmp/request.sh 2>/dev/null || true');
+      const r = await sb.execute('bash -lc "bash /tmp/request.sh 2>&1"');
+      const out = `${r.output || ''}${r.exitCode !== 0 ? `\n[exit code: ${r.exitCode}]` : ''}`;
+      const maxOut = 12000;
+      return out.length > maxOut ? `${out.slice(0, maxOut)}\n... [输出已截断]` : out;
+    } finally {
+      try {
+        await sb.close();
+      } catch (e: any) {
+        this.logger.warn(`Daytona sandbox close: ${e?.message}`);
+      }
+    }
+  }
+
+  /** 合并用户描述、请求示例与沙盒输出，供知识库/外部检索 */
+  private buildTriageRetrievalQuery(
+    question: string,
+    requestExample: string | undefined,
+    sandboxLog: string,
+  ): string {
+    if (!requestExample?.trim() && !sandboxLog.trim()) return question;
+    return [
+      question,
+      '--- 客户请求示例（节选） ---',
+      (requestExample || '').trim().slice(0, 4000),
+      '--- 沙盒执行输出（节选） ---',
+      sandboxLog.trim().slice(0, 6000),
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
   private formatHybridFactsForPrompt(
     intRes: KBSmartQueryResult,
     extRes: { answer: string; sources: KBSearchResult[] },
@@ -610,10 +663,25 @@ export class KnowledgeBaseService {
     history: KBChatMessage[];
     usedSearchMode: 'internal' | 'hybrid';
     sideQueue: KbSideQueue;
+    useSandbox?: boolean;
+    requestExample?: string;
   }): AsyncGenerator<KbStreamPayload> {
-    const { question, history, usedSearchMode, sideQueue } = params;
+    const { question, history, usedSearchMode, sideQueue, useSandbox, requestExample } = params;
     const historyChat = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
     const historyForKb = [...historyChat, { role: 'user' as const, content: question }].slice(-10);
+
+    let sandboxLog = '';
+    if (useSandbox && requestExample?.trim()) {
+      sideQueue.push({ type: 'status', phase: 'sandbox', detail: 'start', tool: 'daytona' });
+      try {
+        sandboxLog = await this.runSandboxRequestExample(requestExample.trim());
+      } catch (e: any) {
+        sandboxLog = `【沙盒执行失败】${e?.message || String(e)}`;
+        this.logger.warn(`Daytona: ${e?.message}`);
+      }
+      sideQueue.push({ type: 'status', phase: 'sandbox', detail: 'done', tool: 'daytona' });
+    }
+    const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog);
 
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
@@ -633,7 +701,11 @@ export class KnowledgeBaseService {
       const internalTool = tool(
         async ({ question: qtext }: { question: string }) => {
           q.push({ type: 'status', phase: 'internal_kb', detail: 'start', tool: 'internal_kb_search' });
-          const res = await this.smartQuery(qtext, 5, historyForKb);
+          const res = await this.smartQuery(
+            [qtext, retrievalQuery !== question ? `\n${retrievalQuery.slice(0, 2000)}` : ''].join('').trim(),
+            5,
+            historyForKb,
+          );
           dedupeSource(res.sources || []);
           q.push({ type: 'status', phase: 'internal_kb', detail: 'done', tool: 'internal_kb_search' });
           return JSON.stringify({
@@ -655,12 +727,12 @@ export class KnowledgeBaseService {
 
     if (usedSearchMode === 'hybrid') {
       sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'start', tool: 'internal_kb_search' });
-      const intRes = await this.smartQuery(question, 5, historyForKb);
+      const intRes = await this.smartQuery(retrievalQuery, 5, historyForKb);
       dedupeSource(intRes.sources || []);
       sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'done', tool: 'internal_kb_search' });
 
       sideQueue.push({ type: 'status', phase: 'ai_search', detail: 'start', tool: 'external_ai_search' });
-      const extRes = await this.aiSearchWithOptionalSse(question, sideQueue);
+      const extRes = await this.aiSearchWithOptionalSse(retrievalQuery, sideQueue);
       dedupeSource(extRes.sources || []);
       if (Array.isArray(extRes.followUps) && extRes.followUps.length > 0) {
         followUps.splice(0, followUps.length, ...extRes.followUps);
@@ -675,27 +747,55 @@ export class KnowledgeBaseService {
 
       const facts = this.formatHybridFactsForPrompt(intRes, extRes);
       toolsArr = [];
+      const sandboxBlock =
+        useSandbox && (requestExample?.trim() || sandboxLog)
+          ? [
+              '\n【请求示例与沙盒复现】',
+              '客户请求示例（节选）:',
+              (requestExample || '').trim().slice(0, 6000) || '（无）',
+              '',
+              '沙盒标准输出（节选）:',
+              sandboxLog.slice(0, 8000) || '（无）',
+              '',
+              '请结合检索事实与沙盒输出做根因分析、排错步骤与安全提示；若沙盒失败说明可能原因。',
+            ].join('\n')
+          : '';
       systemPrompt = [
         '你是工单系统知识库助手。系统已自动完成「内部知识库」与「外部 AI 搜索」；下列【检索事实】为唯一依据，请综合回答用户，不得编造。',
         '输出中文：先给结论；区分内部要点与外部补充；若某一侧无有效内容要如实说明。',
         '不要原样复读长段 JSON。',
         '\n【检索事实】\n',
         facts,
+        sandboxBlock,
       ].join('\n');
     } else {
       toolsArr = mkTools(sideQueue);
       systemPrompt = [
         '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
         `当前检索模式: ${usedSearchMode}`,
+        useSandbox && (requestExample?.trim() || sandboxLog)
+          ? [
+              '当前已启用沙盒：用户粘贴了请求示例，且系统已在隔离环境中尝试执行；工具检索时请结合用户问题与下方【客户请求示例/沙盒输出】做接口/HTTP 排错。',
+              '【客户请求示例（节选）】',
+              (requestExample || '').trim().slice(0, 4000) || '（无）',
+              '【沙盒输出（节选）】',
+              sandboxLog.slice(0, 6000) || '（无）',
+            ].join('\n')
+          : '',
         '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
         '不要原样复读工具JSON，要整理成可读答案。',
-      ].join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
     }
 
     const userContent = [
       `历史对话（最近10轮）:\n${historyChat.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
       `\n用户问题:\n${question}`,
-    ].join('\n');
+      useSandbox && (requestExample?.trim() || sandboxLog)
+        ? `\n\n---\n【客户请求示例】\n${(requestExample || '').trim() || '（无）'}\n\n【沙盒复现输出】\n${sandboxLog || '（无）'}\n`
+        : '',
+    ].join('');
 
     const runOneModel = async function* (
       this: KnowledgeBaseService,
@@ -739,7 +839,7 @@ export class KnowledgeBaseService {
       const msg = String(err?.message || '');
       this.logger.warn(`主模型流式调用失败: ${msg}`);
       if (msg.includes('429') || msg.includes('RATE_LIMIT')) {
-        const degraded = await this.smartQuery(question, 5, historyForKb);
+        const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
         dedupeSource(degraded.sources || []);
         const text =
           degraded.answer ||
@@ -751,7 +851,7 @@ export class KnowledgeBaseService {
           yield* runOneModel.call(this, this.llmFallbackModel, q2);
         } catch (err2: any) {
           this.logger.error(`回退模型流式失败: ${err2?.message}`, err2?.stack);
-          const degraded = await this.smartQuery(question, 5, historyForKb);
+          const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
           dedupeSource(degraded.sources || []);
           yield { type: 'token', text: degraded.answer || '暂时无法生成回答，请稍后重试。', source: 'llm' };
         }
@@ -773,6 +873,8 @@ export class KnowledgeBaseService {
     customerCode?: string;
     message: string;
     searchMode?: 'internal' | 'hybrid';
+    useSandbox?: boolean;
+    requestExample?: string;
   }): AsyncGenerator<KbStreamPayload> {
     const usedSearchMode: 'internal' | 'hybrid' = params.searchMode === 'hybrid' ? 'hybrid' : 'internal';
     let sessionId: string;
@@ -794,6 +896,8 @@ export class KnowledgeBaseService {
         history,
         usedSearchMode,
         sideQueue,
+        useSandbox: params.useSandbox,
+        requestExample: params.requestExample,
       })) {
         if (p.type === 'token' && p.source === 'llm') assistantText += p.text;
         if (p.type === 'meta') {
@@ -820,6 +924,8 @@ export class KnowledgeBaseService {
     question: string;
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
     searchMode: 'internal' | 'hybrid';
+    useSandbox?: boolean;
+    requestExample?: string;
   }) {
     const normalizeMessageContent = (content: any): string => {
       if (typeof content === 'string') return content;
@@ -854,8 +960,19 @@ export class KnowledgeBaseService {
       return '';
     };
 
-    const { question, history, searchMode } = params;
+    const { question, history, searchMode, useSandbox, requestExample } = params;
     const historyForKb = [...history, { role: 'user' as const, content: question }].slice(-10);
+    let sandboxLog = '';
+    if (useSandbox && requestExample?.trim()) {
+      try {
+        sandboxLog = await this.runSandboxRequestExample(requestExample.trim());
+      } catch (e: any) {
+        sandboxLog = `【沙盒执行失败】${e?.message || String(e)}`;
+        this.logger.warn(`Daytona (sync): ${e?.message}`);
+      }
+    }
+    const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog);
+
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
     let confidence: number | undefined;
@@ -875,11 +992,11 @@ export class KnowledgeBaseService {
 
     if (searchMode === 'hybrid') {
       const noopQ = new KbSideQueue();
-      const intRes = await this.smartQuery(question, 5, historyForKb);
+      const intRes = await this.smartQuery(retrievalQuery, 5, historyForKb);
       dedupeSource(intRes.sources || []);
       let extRes: { answer: string; sources: KBSearchResult[]; followUps: string[]; confidence?: number };
       try {
-        extRes = await this.aiSearchWithOptionalSse(question, noopQ);
+        extRes = await this.aiSearchWithOptionalSse(retrievalQuery, noopQ);
       } finally {
         noopQ.close();
       }
@@ -896,17 +1013,33 @@ export class KnowledgeBaseService {
         );
       }
       tools = [];
+      const hybridSandbox =
+        useSandbox && (requestExample?.trim() || sandboxLog)
+          ? [
+              '\n【请求示例与沙盒复现】',
+              (requestExample || '').trim().slice(0, 6000) || '（无）',
+              '',
+              sandboxLog.slice(0, 8000) || '（无）',
+            ].join('\n')
+          : '';
       systemPrompt = [
         '你是工单系统知识库助手。系统已自动完成内部与外部检索；下列【检索事实】为唯一依据，请综合回答，不得编造。',
         '输出中文，先结论后依据；区分内部与外部补充；某一侧无内容要说明。',
         '不要原样复读长段 JSON。',
         '\n【检索事实】\n',
         this.formatHybridFactsForPrompt(intRes, extRes),
-      ].join('\n');
+        hybridSandbox,
+      ]
+        .filter(Boolean)
+        .join('\n');
     } else {
       const internalTool = tool(
         async ({ question: q }: { question: string }) => {
-          const res = await this.smartQuery(q, 5, historyForKb);
+          const res = await this.smartQuery(
+            [q, retrievalQuery !== question ? `\n${retrievalQuery.slice(0, 2000)}` : ''].join('').trim(),
+            5,
+            historyForKb,
+          );
           dedupeSource(res.sources || []);
           return JSON.stringify({
             answer: res.answer || '',
@@ -925,9 +1058,20 @@ export class KnowledgeBaseService {
       systemPrompt = [
         '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
         `当前检索模式: ${searchMode}`,
+        useSandbox && (requestExample?.trim() || sandboxLog)
+          ? [
+              '已启用沙盒：下列为客户请求示例与隔离环境执行输出，请结合工具检索做接口排错。',
+              '【请求示例（节选）】',
+              (requestExample || '').trim().slice(0, 4000) || '（无）',
+              '【沙盒输出（节选）】',
+              sandboxLog.slice(0, 6000) || '（无）',
+            ].join('\n')
+          : '',
         '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
         '不要原样复读工具JSON，要整理成可读答案。',
-      ].join('\n');
+      ]
+        .filter(Boolean)
+        .join('\n');
     }
 
     const invokeAgentWithModel = async (modelName: string) => {
@@ -945,7 +1089,10 @@ export class KnowledgeBaseService {
               content: [
                 `历史对话（最近10轮）:\n${history.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
                 `\n用户问题:\n${question}`,
-              ].join('\n'),
+                useSandbox && (requestExample?.trim() || sandboxLog)
+                  ? `\n\n---\n【客户请求示例】\n${(requestExample || '').trim() || '（无）'}\n\n【沙盒复现输出】\n${sandboxLog || '（无）'}\n`
+                  : '',
+              ].join(''),
             },
           ],
         },
@@ -961,7 +1108,7 @@ export class KnowledgeBaseService {
       this.logger.warn(`主模型调用失败，准备回退模型: ${err.message}`);
       const primaryErr = String(err?.message || '');
       if (primaryErr.includes('429') || primaryErr.includes('RATE_LIMIT')) {
-        const degraded = await this.smartQuery(question, 5, historyForKb);
+        const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
         dedupeSource(degraded.sources || []);
         output = degraded.answer || '';
         return {
@@ -977,7 +1124,7 @@ export class KnowledgeBaseService {
       } catch (err2: any) {
         this.logger.error(`回退模型调用失败: ${err2?.message}`, err2?.stack);
         // 主备模型都失败时不要中断接口，降级为内部知识库直答，避免前端再次提问直接报错。
-        const degraded = await this.smartQuery(question, 5, historyForKb);
+        const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
         dedupeSource(degraded.sources || []);
         output = degraded.answer || '';
       }
@@ -998,6 +1145,8 @@ export class KnowledgeBaseService {
     customerCode?: string;
     message: string;
     searchMode?: 'internal' | 'hybrid';
+    useSandbox?: boolean;
+    requestExample?: string;
   }) {
     const usedSearchMode: 'internal' | 'hybrid' = params.searchMode === 'hybrid' ? 'hybrid' : 'internal';
     const sessionId = await this.getOrCreateSession(params);
@@ -1008,6 +1157,8 @@ export class KnowledgeBaseService {
       question: params.message,
       history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
       searchMode: usedSearchMode,
+      useSandbox: params.useSandbox,
+      requestExample: params.requestExample,
     });
     const answer = agentResult.answer;
 
