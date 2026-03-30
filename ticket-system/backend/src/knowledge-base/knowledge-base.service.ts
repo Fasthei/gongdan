@@ -5,6 +5,7 @@ import FormData from 'form-data';
 import { PrismaService } from '../prisma/prisma.service';
 import { randomUUID } from 'crypto';
 import { ChatOpenAI } from '@langchain/openai';
+import { AIMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { createAgent, tool } from 'langchain';
 
@@ -385,14 +386,37 @@ export class KnowledgeBaseService {
       if (typeof content === 'string') return content;
       if (Array.isArray(content)) {
         return content
-          .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+          .map((part) => {
+            if (typeof part?.text === 'string') return part.text;
+            if (typeof part === 'object' && part !== null && 'type' in part) {
+              const t = (part as { type?: string; text?: string }).type;
+              const tx = (part as { text?: string }).text;
+              if (t === 'text' && typeof tx === 'string') return tx;
+            }
+            return '';
+          })
           .filter(Boolean)
           .join('\n');
       }
       return '';
     };
 
+    const extractAgentAnswerText = (state: any): string => {
+      const fromTop = normalizeMessageContent(state?.content);
+      if (fromTop.trim()) return fromTop;
+      const msgs = state?.messages;
+      if (!Array.isArray(msgs)) return '';
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (!AIMessage.isInstance(m)) continue;
+        const text = normalizeMessageContent(m.content);
+        if (text.trim()) return text;
+      }
+      return '';
+    };
+
     const { question, history, searchMode } = params;
+    const historyForKb = [...history, { role: 'user' as const, content: question }].slice(-10);
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
     let confidence: number | undefined;
@@ -409,7 +433,7 @@ export class KnowledgeBaseService {
 
     const internalTool = tool(
       async ({ question: q }: { question: string }) => {
-        const res = await this.smartQuery(q, 5, history.slice(-10));
+        const res = await this.smartQuery(q, 5, historyForKb);
         dedupeSource(res.sources || []);
         return JSON.stringify({
           answer: res.answer || '',
@@ -473,31 +497,35 @@ export class KnowledgeBaseService {
         tools,
         systemPrompt,
       });
-      return (agent as any).invoke({
-        messages: [
-          {
-            role: 'user',
-            content: [
-              `历史对话（最近10轮）:\n${history.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
-              `\n用户问题:\n${question}`,
-            ].join('\n'),
-          },
-        ],
-      });
+      return (agent as any).invoke(
+        {
+          messages: [
+            {
+              role: 'user',
+              content: [
+                `历史对话（最近10轮）:\n${history.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
+                `\n用户问题:\n${question}`,
+              ].join('\n'),
+            },
+          ],
+        },
+        { recursionLimit: 50 },
+      );
     };
 
     let output: string;
     try {
       const res = await invokeAgentWithModel(this.llmPrimaryModel);
-      output =
-        normalizeMessageContent((res as any)?.content) ||
-        normalizeMessageContent((res as any)?.messages?.[(res as any).messages.length - 1]?.content);
+      output = extractAgentAnswerText(res);
     } catch (err: any) {
       this.logger.warn(`主模型调用失败，准备回退模型: ${err.message}`);
-      const res = await invokeAgentWithModel(this.llmFallbackModel);
-      output =
-        normalizeMessageContent((res as any)?.content) ||
-        normalizeMessageContent((res as any)?.messages?.[(res as any).messages.length - 1]?.content);
+      try {
+        const res = await invokeAgentWithModel(this.llmFallbackModel);
+        output = extractAgentAnswerText(res);
+      } catch (err2: any) {
+        this.logger.error(`回退模型调用失败: ${err2?.message}`, err2?.stack);
+        throw err2;
+      }
     }
 
     return {

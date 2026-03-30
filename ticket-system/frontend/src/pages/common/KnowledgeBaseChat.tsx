@@ -55,8 +55,12 @@ export default function KnowledgeBaseChat() {
       api.get(`/knowledge-base/chat/${sessionId}`)
         .then(({ data }) => {
           if (Array.isArray(data) && data.length > 0) {
-            setChat(data);
-            localStorage.setItem('kb-chat-history', JSON.stringify(data));
+            setChat((prev) => {
+              // 避免：再次提问已乐观追加本地消息时，较慢的 GET 把界面刷回旧历史
+              if (prev.length > data.length) return prev;
+              localStorage.setItem('kb-chat-history', JSON.stringify(data));
+              return data;
+            });
           }
         })
         .catch(() => {
