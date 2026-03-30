@@ -8,6 +8,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { AIMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { createAgent, tool } from 'langchain';
+import { KbStreamPayload, KbSideQueue, mergeAgentStreamAndQueue } from './kb-stream.events';
 
 export interface KBSearchResult {
   id: string;
@@ -365,7 +366,7 @@ export class KnowledgeBaseService {
     }
   }
 
-  private createAgentModel(modelName: string) {
+  private createAgentModel(modelName: string, streaming = false) {
     return new ChatOpenAI({
       model: modelName,
       apiKey: this.llmApiKey,
@@ -375,7 +376,297 @@ export class KnowledgeBaseService {
       temperature: 0.2,
       timeout: 15000,
       maxRetries: 0,
+      streaming,
     });
+  }
+
+  private chunkToLlmText(chunk: any): string {
+    if (!chunk) return '';
+    const c = chunk.content;
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) {
+      return c
+        .map((part: any) => {
+          if (typeof part?.text === 'string') return part.text;
+          if (part?.type === 'text' && typeof part?.text === 'string') return part.text;
+          return '';
+        })
+        .join('');
+    }
+    return '';
+  }
+
+  /**
+   * AI 搜索：若配置了 AI_SEARCH_SSE_PATH，则按 SSE 行解析并推入 sideQueue；
+   * 否则走单次 JSON（与 /search 一致）。
+   */
+  private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue) {
+    const ssePath = this.config.get<string>('AI_SEARCH_SSE_PATH')?.trim();
+    if (ssePath) {
+      try {
+        const base = this.aiSearchBaseUrl.replace(/\/$/, '');
+        const path = ssePath.startsWith('/') ? ssePath : `/${ssePath}`;
+        const url = `${base}${path}`;
+        const { data: stream } = await axios.post(url, { query }, { responseType: 'stream', timeout: 120000 });
+        let buffer = '';
+        let fullAnswer = '';
+        const collected: KBSearchResult[] = [];
+        for await (const chunk of stream as AsyncIterable<Buffer>) {
+          buffer += chunk.toString();
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            const s = line.trim();
+            if (!s.startsWith('data:')) continue;
+            const raw = s.slice(5).trim();
+            if (!raw || raw === '[DONE]') continue;
+            try {
+              const j = JSON.parse(raw);
+              const delta =
+                (typeof j.delta === 'string' && j.delta) ||
+                (typeof j.content === 'string' && j.content) ||
+                (typeof j.text === 'string' && j.text) ||
+                (typeof j.answer === 'string' && j.answer) ||
+                '';
+              if (delta) {
+                fullAnswer += delta;
+                sideQueue.push({ type: 'ai_search_token', text: delta });
+              }
+              if (Array.isArray(j.sources)) {
+                for (const item of j.sources) {
+                  collected.push({
+                    id: item.id || '',
+                    title: item.title || item.name || '',
+                    content: item.snippet || item.content || item.text || '',
+                    platform: item.domain || item.source || '',
+                    score: Number(item.score || 0),
+                  });
+                }
+              }
+            } catch {
+              fullAnswer += raw;
+              sideQueue.push({ type: 'ai_search_token', text: raw });
+            }
+          }
+        }
+        return {
+          answer: fullAnswer,
+          sources: collected.length ? collected : [],
+          followUps: [] as string[],
+          confidence: undefined as number | undefined,
+        };
+      } catch (err: any) {
+        this.logger.warn(`AI Search SSE 失败，回退 JSON: ${err?.message}`);
+      }
+    }
+    return this.aiSearch(query);
+  }
+
+  private async *streamChatWithAgent(params: {
+    question: string;
+    history: KBChatMessage[];
+    usedSearchMode: 'internal' | 'hybrid';
+    sideQueue: KbSideQueue;
+  }): AsyncGenerator<KbStreamPayload> {
+    const { question, history, usedSearchMode, sideQueue } = params;
+    const historyChat = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
+    const historyForKb = [...historyChat, { role: 'user' as const, content: question }].slice(-10);
+
+    const sourceBucket: KBSearchResult[] = [];
+    let followUps: string[] = [];
+    let confidence: number | undefined;
+    const dedupeSource = (items: KBSearchResult[]) => {
+      const seen = new Set(sourceBucket.map((s) => `${s.title}::${s.platform || ''}`));
+      for (const item of items) {
+        const key = `${item.title}::${item.platform || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          sourceBucket.push(item);
+        }
+      }
+    };
+
+    const mkTools = (q: KbSideQueue) => {
+      const internalTool = tool(
+        async ({ question: qtext }: { question: string }) => {
+          q.push({ type: 'status', phase: 'internal_kb', detail: 'start', tool: 'internal_kb_search' });
+          const res = await this.smartQuery(qtext, 5, historyForKb);
+          dedupeSource(res.sources || []);
+          q.push({ type: 'status', phase: 'internal_kb', detail: 'done', tool: 'internal_kb_search' });
+          return JSON.stringify({
+            answer: res.answer || '',
+            sources: (res.sources || []).slice(0, 8),
+          });
+        },
+        {
+          name: 'internal_kb_search',
+          description: '查询内部知识库并返回答案与来源文档',
+          schema: z.object({ question: z.string() }),
+        },
+      );
+
+      const externalTool = tool(
+        async ({ query }: { query: string }) => {
+          if (usedSearchMode !== 'hybrid') {
+            return JSON.stringify({ disabled: true, reason: 'external search disabled by searchMode' });
+          }
+          q.push({ type: 'status', phase: 'ai_search', detail: 'start', tool: 'external_ai_search' });
+          const res = await this.aiSearchWithOptionalSse(query, q);
+          dedupeSource(res.sources || []);
+          if (Array.isArray(res.followUps) && res.followUps.length > 0) followUps.splice(0, followUps.length, ...res.followUps);
+          if (typeof res.confidence === 'number') confidence = res.confidence;
+          q.push({ type: 'status', phase: 'ai_search', detail: 'done', tool: 'external_ai_search' });
+          return JSON.stringify({
+            answer: res.answer || '',
+            sources: (res.sources || []).slice(0, 8),
+            followUps: res.followUps || [],
+            confidence: res.confidence,
+          });
+        },
+        {
+          name: 'external_ai_search',
+          description: '调用外部AI搜索（PydanticAI Agent）获取补充答案与追问',
+          schema: z.object({ query: z.string() }),
+        },
+      );
+
+      return usedSearchMode === 'hybrid' ? [internalTool, externalTool] : [internalTool];
+    };
+
+    const systemPrompt = [
+      '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
+      `当前检索模式: ${usedSearchMode}`,
+      '当模式为 internal 时，禁止使用 external_ai_search。',
+      '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
+      '不要原样复读工具JSON，要整理成可读答案。',
+    ].join('\n');
+
+    const userContent = [
+      `历史对话（最近10轮）:\n${historyChat.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
+      `\n用户问题:\n${question}`,
+    ].join('\n');
+
+    const runOneModel = async function* (
+      this: KnowledgeBaseService,
+      modelName: string,
+      toolsArr: ReturnType<typeof mkTools>,
+      q: KbSideQueue,
+    ): AsyncGenerator<KbStreamPayload> {
+      const llm = this.createAgentModel(modelName, true);
+      const agent = createAgent({ model: llm, tools: toolsArr, systemPrompt });
+      let eventStream: AsyncIterable<any>;
+      try {
+        eventStream = await (agent as any).streamEvents(
+          { messages: [{ role: 'user', content: userContent }] },
+          { version: 'v2', recursionLimit: 50 },
+        );
+      } catch (e: any) {
+        q.close();
+        throw e;
+      }
+      const merged = mergeAgentStreamAndQueue(eventStream[Symbol.asyncIterator](), q);
+      try {
+        for await (const item of merged) {
+          if (item.src === 'q') {
+            yield item.p;
+            continue;
+          }
+          const ev = item.ev;
+          if (ev?.event === 'on_chat_model_stream') {
+            const t = this.chunkToLlmText(ev.data?.chunk);
+            if (t) yield { type: 'token', text: t, source: 'llm' };
+          }
+        }
+      } catch (e: any) {
+        q.close();
+        throw e;
+      }
+    };
+
+    const toolsPrimary = mkTools(sideQueue);
+
+    try {
+      yield* runOneModel.call(this, this.llmPrimaryModel, toolsPrimary, sideQueue);
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      this.logger.warn(`主模型流式调用失败: ${msg}`);
+      if (msg.includes('429') || msg.includes('RATE_LIMIT')) {
+        const degraded = await this.smartQuery(question, 5, historyForKb);
+        dedupeSource(degraded.sources || []);
+        const text =
+          degraded.answer ||
+          '当前模型限流，已为你切换为内部知识库直答，请稍后再试 AI 增强模式。';
+        yield { type: 'token', text, source: 'llm' };
+      } else {
+        const q2 = new KbSideQueue();
+        const toolsFb = mkTools(q2);
+        try {
+          yield* runOneModel.call(this, this.llmFallbackModel, toolsFb, q2);
+        } catch (err2: any) {
+          this.logger.error(`回退模型流式失败: ${err2?.message}`, err2?.stack);
+          const degraded = await this.smartQuery(question, 5, historyForKb);
+          dedupeSource(degraded.sources || []);
+          yield { type: 'token', text: degraded.answer || '暂时无法生成回答，请稍后重试。', source: 'llm' };
+        }
+      }
+    }
+
+    yield {
+      type: 'meta',
+      sources: sourceBucket.slice(0, 10),
+      followUps,
+      confidence,
+    };
+  }
+
+  async *chatStream(params: {
+    sessionId?: string;
+    userId: string;
+    userRole: string;
+    customerCode?: string;
+    message: string;
+    searchMode?: 'internal' | 'hybrid';
+  }): AsyncGenerator<KbStreamPayload> {
+    const usedSearchMode: 'internal' | 'hybrid' = params.searchMode === 'hybrid' ? 'hybrid' : 'internal';
+    let sessionId: string;
+    try {
+      sessionId = await this.getOrCreateSession(params);
+    } catch (e: any) {
+      yield { type: 'error', message: e?.message || '会话创建失败' };
+      return;
+    }
+    const history = await this.getSessionMessages(sessionId, params.userId);
+    await this.addMessage(sessionId, 'user', params.message, usedSearchMode);
+    yield { type: 'session', sessionId, usedSearchMode };
+
+    let assistantText = '';
+    const sideQueue = new KbSideQueue();
+    try {
+      for await (const p of this.streamChatWithAgent({
+        question: params.message,
+        history,
+        usedSearchMode,
+        sideQueue,
+      })) {
+        if (p.type === 'token' && p.source === 'llm') assistantText += p.text;
+        if (p.type === 'meta') {
+          yield p;
+          continue;
+        }
+        yield p;
+      }
+    } catch (e: any) {
+      sideQueue.close();
+      yield { type: 'error', message: e?.message || '流式对话失败' };
+      assistantText = assistantText || '对话中断，请重试。';
+    } finally {
+      sideQueue.close();
+    }
+
+    if (!assistantText.trim()) assistantText = '暂未检索到可用答案，请换个问法试试。';
+    await this.addMessage(sessionId, 'assistant', assistantText, usedSearchMode);
+    const messages = await this.getSessionMessages(sessionId, params.userId);
+    yield { type: 'done', messages };
   }
 
   private async buildAgentAnswer(params: {

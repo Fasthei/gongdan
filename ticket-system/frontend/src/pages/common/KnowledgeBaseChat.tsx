@@ -37,6 +37,7 @@ export default function KnowledgeBaseChat() {
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const [chatHistoryList, setChatHistoryList] = useState<any[]>([]);
+  const [aiSearchStreamText, setAiSearchStreamText] = useState('');
 
   const canAsk = useMemo(() => {
     if (isCustomer) return !!verifiedCode;
@@ -84,38 +85,151 @@ export default function KnowledgeBaseChat() {
     }
   }, [chat, loading]);
 
+  const fetchWithAuthStream = async (url: string, init: RequestInit): Promise<Response> => {
+    let token = localStorage.getItem('accessToken');
+    const headers = new Headers(init.headers);
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let res = await fetch(url, { ...init, headers });
+    if (res.status === 401) {
+      const rt = localStorage.getItem('refreshToken');
+      if (rt) {
+        const rr = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: rt }),
+        });
+        if (rr.ok) {
+          const d = await rr.json();
+          localStorage.setItem('accessToken', d.accessToken);
+          token = d.accessToken;
+          headers.set('Authorization', `Bearer ${token}`);
+          res = await fetch(url, { ...init, headers });
+        }
+      }
+    }
+    return res;
+  };
+
   const ask = async () => {
     if (!question.trim()) return;
     if (!canAsk) return message.warning('客户请先输入并确认客户编号');
 
     const userMsg: ChatItem = { role: 'user', content: question.trim(), searchMode };
-    const nextChat = [...chat, userMsg];
+    const placeholderAssistant: ChatItem = { role: 'assistant', content: '', searchMode };
+    const nextChat = [...chat, userMsg, placeholderAssistant];
     setChat(nextChat);
-    localStorage.setItem('kb-chat-history', JSON.stringify(nextChat));
+    localStorage.setItem('kb-chat-history', JSON.stringify([...chat, userMsg]));
     setQuestion('');
     setLoading(true);
+    setAiSearchStreamText('');
+    let acc = '';
+    let roundMode: 'internal' | 'hybrid' = searchMode;
+    let gotDone = false;
+
+    const patchAssistant = (text: string) => {
+      acc = text;
+      setChat((prev) => {
+        const c = [...prev];
+        const last = c.length - 1;
+        if (last >= 0 && c[last].role === 'assistant') {
+          c[last] = { ...c[last], content: text, searchMode: roundMode };
+        }
+        return c;
+      });
+    };
 
     try {
-      const { data } = await api.post('/knowledge-base/chat', {
-        sessionId: sessionId || undefined,
-        message: userMsg.content,
-        searchMode,
-        ...(isCustomer ? { customerCode: verifiedCode } : {}),
+      const res = await fetchWithAuthStream('/api/knowledge-base/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: sessionId || undefined,
+          message: userMsg.content,
+          searchMode,
+          ...(isCustomer ? { customerCode: verifiedCode } : {}),
+        }),
       });
-      const answer = data?.answer || '未获取到答案';
-      const roundMode: 'internal' | 'hybrid' = data?.usedSearchMode === 'hybrid' ? 'hybrid' : 'internal';
-      const merged = [...nextChat, { role: 'assistant', content: answer, searchMode: roundMode } as ChatItem];
-      setChat(merged);
-      localStorage.setItem('kb-chat-history', JSON.stringify(merged));
-      if (data?.sessionId) {
-        setSessionId(data.sessionId);
-        localStorage.setItem('kb-chat-session-id', data.sessionId);
+      if (!res.ok) {
+        let errMsg = '知识库对话失败';
+        try {
+          const j = await res.json();
+          errMsg = j.message || errMsg;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(errMsg);
       }
-      setSources(Array.isArray(data?.sources) ? data.sources : []);
-      setFollowUps(Array.isArray(data?.followUps) ? data.followUps : []);
-      setUsedSearchMode(data?.usedSearchMode === 'hybrid' ? 'hybrid' : 'internal');
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('无法读取流式响应');
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const blocks = buf.split('\n\n');
+        buf = blocks.pop() || '';
+        for (const block of blocks) {
+          const dataLine = block.split('\n').find((l) => l.startsWith('data:'));
+          if (!dataLine) continue;
+          const raw = dataLine.replace(/^data:\s*/i, '').trim();
+          if (!raw) continue;
+          let json: any;
+          try {
+            json = JSON.parse(raw);
+          } catch {
+            continue;
+          }
+          if (json.type === 'session') {
+            if (json.sessionId) {
+              setSessionId(json.sessionId);
+              localStorage.setItem('kb-chat-session-id', json.sessionId);
+            }
+            if (json.usedSearchMode === 'hybrid' || json.usedSearchMode === 'internal') {
+              roundMode = json.usedSearchMode;
+              setUsedSearchMode(roundMode);
+            }
+          } else if (json.type === 'token' && json.source === 'llm' && typeof json.text === 'string') {
+            patchAssistant(acc + json.text);
+          } else if (json.type === 'ai_search_token' && typeof json.text === 'string') {
+            setAiSearchStreamText((s) => s + json.text);
+          } else if (json.type === 'meta') {
+            setSources(Array.isArray(json.sources) ? json.sources : []);
+            setFollowUps(Array.isArray(json.followUps) ? json.followUps : []);
+          } else if (json.type === 'done' && Array.isArray(json.messages)) {
+            gotDone = true;
+            setChat(json.messages as ChatItem[]);
+            localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
+          } else if (json.type === 'error') {
+            message.error(json.message || '流式对话出错');
+          }
+        }
+      }
+      if (!gotDone) {
+        setChat((prev) => {
+          const copy = [...prev];
+          const last = copy.length - 1;
+          if (last >= 0 && copy[last].role === 'assistant') {
+            const content = copy[last].content?.trim() || acc.trim();
+            copy[last] = {
+              ...copy[last],
+              content: content || '未获取到答案',
+              searchMode: roundMode,
+            };
+          }
+          localStorage.setItem('kb-chat-history', JSON.stringify(copy));
+          return copy;
+        });
+      }
     } catch (err: any) {
-      message.error(err.response?.data?.message || '知识库对话失败');
+      message.error(err?.message || '知识库对话失败');
+      setChat((prev) => {
+        const last = prev[prev.length - 1];
+        if (prev.length >= 2 && last?.role === 'assistant' && !last.content) {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
     } finally {
       setLoading(false);
     }
@@ -269,7 +383,10 @@ export default function KnowledgeBaseChat() {
                     </List.Item>
                   )}
                 />
-                {loading && (
+                {loading &&
+                  chat.length > 0 &&
+                  chat[chat.length - 1]?.role === 'assistant' &&
+                  !chat[chat.length - 1]?.content && (
                   <div style={{ padding: '16px 0', display: 'flex', gap: 16 }}>
                     <Avatar icon={<RobotOutlined />} style={{ background: '#10a37f', flex: '0 0 auto' }} />
                     <div style={{ paddingTop: 6 }}>
@@ -281,13 +398,19 @@ export default function KnowledgeBaseChat() {
 
               {/* Right Sidebar for Sources & Follow-ups */}
               <div style={{ width: 300, flexShrink: 0, display: chat.length > 0 || loading ? 'block' : 'none' }}>
-                {loading && (
+                {(loading || aiSearchStreamText) && (
                   <div style={{ marginBottom: 24, padding: 16, background: '#f8f9fa', borderRadius: 12 }}>
                     <Text strong style={{ display: 'block', marginBottom: 12 }}>思考状态</Text>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
                       <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 分析问题中...</Text>
                       {usedSearchMode === 'hybrid' && <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 调用 AI 搜索 Agent...</Text>}
                       <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 检索内部知识库...</Text>
+                      {aiSearchStreamText ? (
+                        <div style={{ marginTop: 8, maxHeight: 160, overflow: 'auto' }}>
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>AI 搜索（流式）</Text>
+                          <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{aiSearchStreamText}</Text>
+                        </div>
+                      ) : null}
                     </Space>
                   </div>
                 )}

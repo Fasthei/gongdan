@@ -1,4 +1,5 @@
-import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors, Get, Param } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors, Get, Param, Res, Req } from '@nestjs/common';
+import { Response } from 'express';
 import { KnowledgeBaseService } from './knowledge-base.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -99,6 +100,62 @@ export class KnowledgeBaseController {
       message: body.message.trim(),
       searchMode: body.searchMode,
     });
+  }
+
+  /** SSE：内部知识库仍单次请求；主模型 token 流式；AI 搜索在配置 AI_SEARCH_SSE_PATH 时可 SSE，否则仅状态 + 单次 JSON */
+  @Post('chat/stream')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  async chatStream(
+    @Body()
+    body: {
+      sessionId?: string;
+      message: string;
+      customerCode?: string;
+      searchMode?: 'internal' | 'hybrid';
+    },
+    @Req() req: any,
+    @Res({ passthrough: false }) res: Response,
+  ) {
+    if (!body.message?.trim()) {
+      res.status(400).json({ message: '消息不能为空' });
+      return;
+    }
+    if (req.user?.role === 'CUSTOMER') {
+      if (!body.customerCode) {
+        res.status(403).json({ message: '客户使用知识库前请先输入客户编号' });
+        return;
+      }
+      const customer = await this.prisma.customer.findUnique({
+        where: { customerCode: body.customerCode },
+        select: { id: true },
+      });
+      if (!customer || customer.id !== req.user.customerId) {
+        res.status(403).json({ message: '客户编号校验失败，无法使用知识库' });
+        return;
+      }
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    (res as any).flushHeaders?.();
+
+    try {
+      for await (const chunk of this.kbService.chatStream({
+        sessionId: body.sessionId,
+        userId: req.user.id,
+        userRole: req.user.role,
+        customerCode: body.customerCode,
+        message: body.message.trim(),
+        searchMode: body.searchMode,
+      })) {
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+      }
+    } catch (e: any) {
+      res.write(`data: ${JSON.stringify({ type: 'error', message: e?.message || '流式输出失败' })}\n\n`);
+    }
+    res.end();
   }
 
   @Get('chat/sessions/list')
