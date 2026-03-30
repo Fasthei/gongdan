@@ -8,6 +8,10 @@ on:
       - '.github/workflows/backend-deploy.yml'
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -37,8 +41,13 @@ jobs:
           npx prisma generate
           zip -r ../backend.zip .
 
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_A41936EDE47248FDB344FCE518B4E215 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4FD21C9C42B4452AB4E39476E76760CD }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6092945B90A1416DA54A488C84D44231 }}
+
       - uses: azure/webapps-deploy@v3
         with:
           app-name: gongdan
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: backend.zip
