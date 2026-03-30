@@ -120,7 +120,7 @@ export default function KnowledgeBaseChat() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', background: '#fff', margin: '0' }}>
       {/* Header */}
-      <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '20px 20px 10px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => window.history.back()} />
           <Title level={5} style={{ margin: 0 }}>知识库对话</Title>
