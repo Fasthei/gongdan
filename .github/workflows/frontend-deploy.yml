@@ -9,7 +9,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -31,15 +30,6 @@ jobs:
           npm install
           npm run build
 
-      - name: Get OIDC Token
-        uses: actions/github-script@v6
-        id: idtoken
-        with:
-          script: |
-            const coredemo = require('@actions/core')
-            return await coredemo.getIDToken()
-          result-encoding: string
-
       - uses: Azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_KIND_FOREST_0138C3300 }}
@@ -47,4 +37,3 @@ jobs:
           action: upload
           app_location: ticket-system/frontend/dist
           skip_app_build: true
-          github_id_token: ${{ steps.idtoken.outputs.result }}
