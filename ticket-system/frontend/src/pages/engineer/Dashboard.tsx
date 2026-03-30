@@ -146,7 +146,6 @@ function AdminAccountSettings() {
   const [engLoading, setEngLoading] = React.useState(false);
   const [opLoading, setOpLoading] = React.useState(false);
   const [kbLoading, setKbLoading] = React.useState(false);
-  const [kbMeta, setKbMeta] = React.useState({ platform: '', title: '' });
 
   const handleCreateEngineer = async (values: any) => {
     setEngLoading(true);
@@ -179,8 +178,6 @@ function AdminAccountSettings() {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      if (kbMeta.platform) formData.append('platform', kbMeta.platform);
-      if (kbMeta.title) formData.append('title', kbMeta.title);
       await api.post('/knowledge-base/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
@@ -234,18 +231,6 @@ function AdminAccountSettings() {
       <Divider />
 
       <Typography.Title level={5}>上传知识库资料</Typography.Title>
-      <Input
-        placeholder="平台（可选，如 taiji/xm/original）"
-        value={kbMeta.platform}
-        onChange={(e) => setKbMeta({ ...kbMeta, platform: e.target.value })}
-        style={{ marginBottom: 8 }}
-      />
-      <Input
-        placeholder="标题（可选）"
-        value={kbMeta.title}
-        onChange={(e) => setKbMeta({ ...kbMeta, title: e.target.value })}
-        style={{ marginBottom: 12 }}
-      />
       <input
         type="file"
         disabled={kbLoading}
