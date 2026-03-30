@@ -1,0 +1,57 @@
+import React, { useState } from 'react';
+import { Card, Form, Input, Button, Alert, Typography } from 'antd';
+import { useNavigate, Link } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import api from '../api/axios';
+
+const { Title, Text } = Typography;
+
+export default function CustomerLogin() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  const onFinish = async ({ customerCode }: { customerCode: string }) => {
+    setLoading(true);
+    setError('');
+    try {
+      const { data } = await api.post('/auth/customer-login', { customerCode });
+      login(data.accessToken, data.refreshToken, data.user);
+      navigate('/tickets');
+    } catch (err: any) {
+      setError(err.response?.data?.message || '客户编号无效，请联系运营');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f5' }}>
+      <Card style={{ width: 400, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <Title level={3} style={{ margin: 0 }}>技术支持工单系统</Title>
+          <Text type="secondary">客户登录</Text>
+        </div>
+        {error && <Alert message={error} type="error" showIcon style={{ marginBottom: 16 }} />}
+        <Form onFinish={onFinish} layout="vertical">
+          <Form.Item
+            name="customerCode"
+            label="客户编号"
+            rules={[{ required: true, message: '请输入客户编号' }]}
+          >
+            <Input placeholder="请输入客户编号，如 CUST-XXXXXXXX" size="large" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={loading} block size="large">
+              登录
+            </Button>
+          </Form.Item>
+        </Form>
+        <div style={{ textAlign: 'center' }}>
+          <Link to="/staff/login">运营 / 技术人员登录</Link>
+        </div>
+      </Card>
+    </div>
+  );
+}

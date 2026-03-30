@@ -1,0 +1,168 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CustomerTier {
+  NORMAL
+  KEY
+  EXCLUSIVE
+}
+
+enum EngineerLevel {
+  L1
+  L2
+  L3
+}
+
+enum EngineerRole {
+  ENGINEER
+  ADMIN
+}
+
+enum OperatorRole {
+  OPERATOR
+}
+
+enum TicketStatus {
+  PENDING
+  ACCEPTED
+  IN_PROGRESS
+  PENDING_CLOSE
+  CLOSED
+}
+
+enum TicketPriority {
+  NORMAL
+  PRIORITY
+  EXCLUSIVE
+}
+
+enum Platform {
+  taiji
+  xm
+  original
+}
+
+enum NetworkEnv {
+  local
+  cloud
+}
+
+enum CreatedByRole {
+  CUSTOMER
+  OPERATOR
+}
+
+model Customer {
+  id               String       @id @default(uuid())
+  customerCode     String       @unique
+  name             String
+  tier             CustomerTier @default(NORMAL)
+  boundEngineerId  String?
+  firstResponseHours Int        @default(24)
+  resolutionHours  Int          @default(72)
+  queueType        String       @default("PUBLIC")
+  createdBy        String
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  tickets          Ticket[]
+  boundEngineer    Engineer?    @relation("BoundEngineer", fields: [boundEngineerId], references: [id])
+
+  @@index([customerCode])
+  @@index([tier])
+}
+
+model Engineer {
+  id          String        @id @default(uuid())
+  username    String        @unique
+  email       String        @unique
+  passwordHash String
+  level       EngineerLevel @default(L1)
+  role        EngineerRole  @default(ENGINEER)
+  isAvailable Boolean       @default(true)
+  createdBy   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  assignedTickets  Ticket[]   @relation("AssignedEngineer")
+  boundCustomers   Customer[] @relation("BoundEngineer")
+
+  @@index([level, isAvailable])
+}
+
+model Operator {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Ticket {
+  id                 String         @id @default(uuid())
+  ticketNumber       String         @unique
+  customerId         String
+  createdBy          String
+  createdByRole      CreatedByRole
+  assignedEngineerId String?
+  engineerLevel      EngineerLevel?
+  status             TicketStatus   @default(PENDING)
+  priority           TicketPriority @default(NORMAL)
+
+  // 工单内容（不可修改）
+  platform           Platform
+  accountInfo        String
+  modelUsed          String
+  description        String         @db.Text
+  requestExample     String         @db.Text
+  contactInfo        String?
+  framework          String?
+  networkEnv         NetworkEnv?
+  attachmentUrls     String[]
+
+  // SLA 时间戳
+  slaDeadline        DateTime
+  acceptedAt         DateTime?
+  firstResponseAt    DateTime?
+  resolvedAt         DateTime?
+  closedAt           DateTime?
+
+  // 关闭审批
+  closeRequestedAt   DateTime?
+  closeRequestedBy   String?
+  closeApprovedAt    DateTime?
+  closeApprovedBy    String?
+
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  customer           Customer       @relation(fields: [customerId], references: [id])
+  assignedEngineer   Engineer?      @relation("AssignedEngineer", fields: [assignedEngineerId], references: [id])
+  urges              TicketUrge[]
+
+  @@index([customerId])
+  @@index([assignedEngineerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([slaDeadline])
+}
+
+model TicketUrge {
+  id        String   @id @default(uuid())
+  ticketId  String
+  urgedBy   String
+  urgedAt   DateTime @default(now())
+  note      String?
+
+  ticket    Ticket   @relation(fields: [ticketId], references: [id])
+
+  @@index([ticketId])
+}
