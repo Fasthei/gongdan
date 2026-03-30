@@ -8,7 +8,7 @@ export class SlaMonitorService {
 
   constructor(private prisma: PrismaService) {}
 
-  @Cron(CronExpression.EVERY_15_MINUTES)
+  @Cron('*/15 * * * *')
   async checkSlaOverdue() {
     const now = new Date();
     const overdueTickets = await this.prisma.ticket.findMany({
