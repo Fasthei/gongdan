@@ -274,6 +274,39 @@ export class KnowledgeBaseService {
     );
   }
 
+  async getUserSessions(userId: string) {
+    await this.ensureSessionTables();
+    const rows = await this.prisma.$queryRawUnsafe<any[]>(
+      `
+      SELECT id, created_at as "createdAt", updated_at as "updatedAt"
+      FROM kb_chat_sessions
+      WHERE user_id = $1
+      ORDER BY updated_at DESC
+      LIMIT 50
+      `,
+      userId,
+    );
+    
+    // We fetch the first message of each session to use as a title
+    const sessionsWithTitles = await Promise.all(
+      rows.map(async (row) => {
+        const msgs = await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT content FROM kb_chat_messages WHERE session_id = $1 AND role = 'user' ORDER BY created_at ASC LIMIT 1`,
+          row.id
+        );
+        const title = msgs.length > 0 ? msgs[0].content : '新对话';
+        return {
+          id: row.id,
+          title: title.length > 20 ? title.substring(0, 20) + '...' : title,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        };
+      })
+    );
+    
+    return sessionsWithTitles;
+  }
+
   async getSessionMessages(sessionId: string, userId: string): Promise<KBChatMessage[]> {
     await this.ensureSessionTables();
     const own = await this.prisma.$queryRawUnsafe<any[]>(

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Segmented } from 'antd';
-import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../../api/axios';
@@ -36,6 +36,8 @@ export default function KnowledgeBaseChat() {
   const [usedSearchMode, setUsedSearchMode] = useState<'internal' | 'hybrid'>('internal');
   const messagesRef = useRef<HTMLDivElement | null>(null);
 
+  const [chatHistoryList, setChatHistoryList] = useState<any[]>([]);
+
   const canAsk = useMemo(() => {
     if (isCustomer) return !!verifiedCode;
     return true;
@@ -61,6 +63,15 @@ export default function KnowledgeBaseChat() {
           // 忽略错误，降级使用本地缓存
         });
     }
+
+    // 尝试拉取用户的历史会话列表
+    api.get('/knowledge-base/chat/sessions')
+      .then(({ data }) => {
+        if (Array.isArray(data)) {
+          setChatHistoryList(data);
+        }
+      })
+      .catch(() => {});
   }, [sessionId]);
 
   useEffect(() => {
@@ -147,9 +158,66 @@ export default function KnowledgeBaseChat() {
           </div>
         </div>
       ) : (
-        <>
-          {/* Messages Area */}
-          <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth', overflowX: 'hidden' }}>
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+          {/* Left Sidebar for Chat History */}
+          <div style={{ width: 260, borderRight: '1px solid #f0f0f0', background: '#fafafa', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid #f0f0f0' }}>
+              <Button 
+                type="dashed" 
+                block 
+                icon={<PlusOutlined />} 
+                onClick={() => {
+                  setChat([]);
+                  setSources([]);
+                  setFollowUps([]);
+                  setSessionId('');
+                  localStorage.removeItem('kb-chat-history');
+                  localStorage.removeItem('kb-chat-session-id');
+                }}
+              >
+                开启新对话
+              </Button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
+              {chatHistoryList.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: '#bfbfbf', fontSize: 13 }}>暂无历史对话</div>
+              ) : (
+                <List
+                  dataSource={chatHistoryList}
+                  renderItem={(item) => (
+                    <List.Item 
+                      style={{ 
+                        padding: '10px 12px', 
+                        cursor: 'pointer', 
+                        borderRadius: 8,
+                        background: sessionId === item.id ? '#e6f4ff' : 'transparent',
+                        borderBottom: 'none',
+                        marginBottom: 4
+                      }}
+                      onClick={() => {
+                        setSessionId(item.id);
+                        localStorage.setItem('kb-chat-session-id', item.id);
+                      }}
+                    >
+                      <div style={{ width: '100%', overflow: 'hidden' }}>
+                        <Text ellipsis style={{ display: 'block', fontSize: 14, color: sessionId === item.id ? '#1677ff' : '#333' }}>
+                          {item.title || '新对话'}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {new Date(item.updatedAt).toLocaleDateString()}
+                        </Text>
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Main Chat Area */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            {/* Messages Area */}
+            <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth', overflowX: 'hidden' }}>
             <div style={{ display: 'flex', maxWidth: 1200, margin: '0 auto', gap: 24, padding: '0 24px' }}>
               {/* Main Chat Stream */}
               <div style={{ flex: 1, maxWidth: 800 }}>
@@ -312,7 +380,8 @@ export default function KnowledgeBaseChat() {
               </div>
             </div>
           </div>
-        </>
+          </div>
+        </div>
       )}
     </div>
   );

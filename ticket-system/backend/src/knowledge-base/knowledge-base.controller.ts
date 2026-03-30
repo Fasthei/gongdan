@@ -101,6 +101,12 @@ export class KnowledgeBaseController {
     });
   }
 
+  @Get('chat/sessions/list')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  getChatSessions(@Request() req: any) {
+    return this.kbService.getUserSessions(req.user.id);
+  }
+
   @Get('chat/:sessionId')
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
   getChatHistory(@Param('sessionId') sessionId: string, @Request() req: any) {
