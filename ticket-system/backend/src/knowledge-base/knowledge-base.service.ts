@@ -123,7 +123,7 @@ export class KnowledgeBaseService {
       const { data } = await axios.post(
         `${this.baseUrl}/api/v1/smart-query`,
         { question, top: topK, history: history || [] },
-        { headers: this.headers, timeout: 15000 },
+        { headers: this.headers, timeout: 10000 },
       );
 
       const sources: KBSearchResult[] = (data.sources || data.results || []).map((item: any) => ({
@@ -351,7 +351,7 @@ export class KnowledgeBaseService {
       const { data } = await axios.post(
         `${this.aiSearchBaseUrl}/search`,
         { query },
-        { timeout: 20000 },
+        { timeout: 10000 },
       );
       return {
         answer: data?.answer || data?.summary || '',
@@ -373,7 +373,8 @@ export class KnowledgeBaseService {
         baseURL: this.llmBaseUrl,
       },
       temperature: 0.2,
-      timeout: 30000,
+      timeout: 15000,
+      maxRetries: 0,
     });
   }
 
@@ -519,6 +520,18 @@ export class KnowledgeBaseService {
       output = extractAgentAnswerText(res);
     } catch (err: any) {
       this.logger.warn(`主模型调用失败，准备回退模型: ${err.message}`);
+      const primaryErr = String(err?.message || '');
+      if (primaryErr.includes('429') || primaryErr.includes('RATE_LIMIT')) {
+        const degraded = await this.smartQuery(question, 5, historyForKb);
+        dedupeSource(degraded.sources || []);
+        output = degraded.answer || '';
+        return {
+          answer: output || '当前模型限流，已为你切换为内部知识库直答，请稍后再试 AI 增强模式。',
+          sources: sourceBucket.slice(0, 10),
+          followUps,
+          confidence,
+        };
+      }
       try {
         const res = await invokeAgentWithModel(this.llmFallbackModel);
         output = extractAgentAnswerText(res);
