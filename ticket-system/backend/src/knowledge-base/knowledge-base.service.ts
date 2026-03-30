@@ -52,7 +52,7 @@ export class KnowledgeBaseService {
     this.apiKey = this.config.get<string>('KB_AGENT_API_KEY') || '';
     this.aiSearchBaseUrl =
       this.config.get<string>('AI_SEARCH_AGENT_URL') ||
-      'https://aisousuo-gxe7hphbduetgqam.eastasia-01.azurewebsites.net/api';
+      'https://aisousuo.azurewebsites.net/api';
     this.llmBaseUrl = this.config.get<string>('LLM_BASE_URL') || 'https://api.taijiaicloud.com/v1';
     this.llmApiKey = this.config.get<string>('LLM_API_KEY') || '';
     this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'claude-sonnet-4-6';
@@ -347,19 +347,185 @@ export class KnowledgeBaseService {
     }));
   }
 
+  /**
+   * aisousuo /api/search 与 SSE result 事件的响应体对齐：
+   * answer / answer.text、answer.confidence、answer.follow_up_questions、answer.citations[].trust_score
+   */
+  private mapAisousuoSearchResponse(data: any): {
+    answer: string;
+    sources: KBSearchResult[];
+    followUps: string[];
+    confidence?: number;
+  } {
+    if (!data || typeof data !== 'object') {
+      return { answer: '', sources: [], followUps: [] };
+    }
+    const root = data.result && typeof data.result === 'object' ? data.result : data;
+    const ans = root.answer;
+    let answerText = '';
+    let confidence: number | undefined;
+    let followUps: string[] = [];
+    const citations: any[] = [];
+
+    if (typeof ans === 'string') {
+      answerText = ans;
+    } else if (ans && typeof ans === 'object') {
+      answerText =
+        (typeof ans.text === 'string' && ans.text) ||
+        (typeof ans.content === 'string' && ans.content) ||
+        (typeof ans.summary === 'string' && ans.summary) ||
+        (typeof ans.message === 'string' && ans.message) ||
+        (typeof ans.answer === 'string' ? ans.answer : '') ||
+        '';
+      if (typeof ans.confidence === 'number') confidence = ans.confidence;
+      if (Array.isArray(ans.follow_up_questions)) followUps = [...ans.follow_up_questions];
+      if (Array.isArray(ans.citations)) citations.push(...ans.citations);
+    }
+
+    if (!answerText) {
+      answerText =
+        (typeof root.summary === 'string' && root.summary) ||
+        (typeof root.text === 'string' && root.text) ||
+        '';
+    }
+
+    const sources: KBSearchResult[] =
+      citations.length > 0
+        ? citations.map((c: any, idx: number) => ({
+            id: String(c.id ?? c.url ?? idx),
+            title: c.title || c.name || c.url || '引用',
+            content: c.snippet || c.text || c.content || '',
+            platform: c.domain || c.source || '',
+            score: Number(c.trust_score ?? c.score ?? 0),
+          }))
+        : this.normalizeAiSearchSources(root);
+
+    if (followUps.length === 0 && Array.isArray(root.follow_up_questions)) followUps = [...root.follow_up_questions];
+    if (followUps.length === 0 && Array.isArray(data.follow_up_questions)) followUps = [...data.follow_up_questions];
+    if (followUps.length === 0 && Array.isArray(data.follow_ups)) followUps = [...data.follow_ups];
+
+    if (confidence === undefined && typeof root.confidence === 'number') confidence = root.confidence;
+    if (confidence === undefined && typeof data.confidence === 'number') confidence = data.confidence;
+
+    return { answer: answerText, sources, followUps, confidence };
+  }
+
+  /** SSE 路径：未配置时默认 /search/stream；设为 false/off 则仅用同步 /search */
+  private getAiSearchSsePath(): string | null {
+    const v = this.config.get<string>('AI_SEARCH_SSE_PATH');
+    if (v === 'false' || v === '0' || v === 'off') return null;
+    const t = (v === undefined || v === null ? '/search/stream' : String(v)).trim();
+    if (!t || t === 'false') return null;
+    return t.startsWith('/') ? t : `/${t}`;
+  }
+
+  /**
+   * aisousuo POST /api/search/stream
+   * 事件：cache_hit, decomposed, expanded, round_*, llm_started, llm_token, result, audit
+   */
+  private async consumeAisousuoSearchSse(
+    stream: NodeJS.ReadableStream,
+    sideQueue: KbSideQueue,
+  ): Promise<{
+    answer: string;
+    sources: KBSearchResult[];
+    followUps: string[];
+    confidence?: number;
+  }> {
+    let buffer = '';
+    let fullLlm = '';
+    let resultPayload: any = null;
+
+    const statusEvents = new Set([
+      'cache_hit',
+      'decomposed',
+      'expanded',
+      'round_started',
+      'round_finished',
+      'llm_started',
+      'audit',
+    ]);
+
+    const handleNamedEvent = (eventName: string, dataRaw: string) => {
+      if (!dataRaw) return;
+      let j: any;
+      try {
+        j = JSON.parse(dataRaw);
+      } catch {
+        return;
+      }
+      const ev = (eventName || j.event || j.type || '').trim();
+      if (ev === 'llm_token') {
+        const t = j.token ?? j.text ?? j.delta ?? j.content ?? '';
+        if (typeof t === 'string' && t) {
+          fullLlm += t;
+          sideQueue.push({ type: 'ai_search_token', text: t });
+        }
+        return;
+      }
+      if (ev === 'result') {
+        resultPayload = j.result !== undefined ? j.result : j.payload !== undefined ? j.payload : j;
+        return;
+      }
+      if (statusEvents.has(ev)) {
+        sideQueue.push({ type: 'status', phase: 'ai_search_sse', detail: ev, tool: 'external_ai_search' });
+      }
+    };
+
+    for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+      buffer += typeof chunk === 'string' ? chunk : chunk.toString();
+      let sep = buffer.indexOf('\n\n');
+      while (sep !== -1) {
+        const block = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let eventName = '';
+        const dataLines: string[] = [];
+        for (const line of block.split('\n')) {
+          const l = line.replace(/\r$/, '');
+          if (l.startsWith('event:')) eventName = l.slice(6).trim();
+          else if (l.startsWith('data:')) dataLines.push(l.slice(5).trim());
+        }
+        const dataRaw = dataLines.join('\n').trim();
+        if (dataRaw) {
+          if (eventName) {
+            handleNamedEvent(eventName, dataRaw);
+          } else {
+            try {
+              const j = JSON.parse(dataRaw);
+              const ev = String(j.event || j.type || '').trim();
+              if (!ev) {
+                handleNamedEvent('result', dataRaw);
+              } else if (j.data !== undefined) {
+                handleNamedEvent(ev, typeof j.data === 'string' ? j.data : JSON.stringify(j.data));
+              } else {
+                handleNamedEvent(ev, dataRaw);
+              }
+            } catch {
+              /* ignore non-JSON data line */
+            }
+          }
+        }
+        sep = buffer.indexOf('\n\n');
+      }
+    }
+
+    const mapped = resultPayload
+      ? this.mapAisousuoSearchResponse(resultPayload)
+      : { answer: '', sources: [] as KBSearchResult[], followUps: [] as string[], confidence: undefined as number | undefined };
+    if (!mapped.answer?.trim() && fullLlm.trim()) mapped.answer = fullLlm;
+    return mapped;
+  }
+
   async aiSearch(query: string) {
     try {
+      const base = this.aiSearchBaseUrl.replace(/\/$/, '');
+      const topK = Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES') || 3) || 3;
       const { data } = await axios.post(
-        `${this.aiSearchBaseUrl}/search`,
-        { query },
-        { timeout: 10000 },
+        `${base}/search`,
+        { query, top_k_pages: topK },
+        { timeout: 120000 },
       );
-      return {
-        answer: data?.answer || data?.summary || '',
-        sources: this.normalizeAiSearchSources(data),
-        followUps: Array.isArray(data?.follow_ups) ? data.follow_ups : [],
-        confidence: typeof data?.confidence === 'number' ? data.confidence : undefined,
-      };
+      return this.mapAisousuoSearchResponse(data);
     } catch (err: any) {
       this.logger.warn(`AI 搜索调用失败: ${err.message}`);
       return { answer: '', sources: [], followUps: [], confidence: undefined };
@@ -397,66 +563,24 @@ export class KnowledgeBaseService {
   }
 
   /**
-   * AI 搜索：若配置了 AI_SEARCH_SSE_PATH，则按 SSE 行解析并推入 sideQueue；
-   * 否则走单次 JSON（与 /search 一致）。
+   * 混合模式下优先走 aisousuo /api/search/stream（与 AI_SEARCH_SSE_PATH，默认 /search/stream）；
+   * 失败或未启用时走同步 /api/search。
    */
   private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue) {
-    const ssePath = this.config.get<string>('AI_SEARCH_SSE_PATH')?.trim();
+    const ssePath = this.getAiSearchSsePath();
     if (ssePath) {
       try {
         const base = this.aiSearchBaseUrl.replace(/\/$/, '');
-        const path = ssePath.startsWith('/') ? ssePath : `/${ssePath}`;
-        const url = `${base}${path}`;
-        const { data: stream } = await axios.post(url, { query }, { responseType: 'stream', timeout: 120000 });
-        let buffer = '';
-        let fullAnswer = '';
-        const collected: KBSearchResult[] = [];
-        for await (const chunk of stream as AsyncIterable<Buffer>) {
-          buffer += chunk.toString();
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            const s = line.trim();
-            if (!s.startsWith('data:')) continue;
-            const raw = s.slice(5).trim();
-            if (!raw || raw === '[DONE]') continue;
-            try {
-              const j = JSON.parse(raw);
-              const delta =
-                (typeof j.delta === 'string' && j.delta) ||
-                (typeof j.content === 'string' && j.content) ||
-                (typeof j.text === 'string' && j.text) ||
-                (typeof j.answer === 'string' && j.answer) ||
-                '';
-              if (delta) {
-                fullAnswer += delta;
-                sideQueue.push({ type: 'ai_search_token', text: delta });
-              }
-              if (Array.isArray(j.sources)) {
-                for (const item of j.sources) {
-                  collected.push({
-                    id: item.id || '',
-                    title: item.title || item.name || '',
-                    content: item.snippet || item.content || item.text || '',
-                    platform: item.domain || item.source || '',
-                    score: Number(item.score || 0),
-                  });
-                }
-              }
-            } catch {
-              fullAnswer += raw;
-              sideQueue.push({ type: 'ai_search_token', text: raw });
-            }
-          }
-        }
-        return {
-          answer: fullAnswer,
-          sources: collected.length ? collected : [],
-          followUps: [] as string[],
-          confidence: undefined as number | undefined,
-        };
+        const url = `${base}${ssePath}`;
+        const topK = Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES') || 3) || 3;
+        const { data: stream } = await axios.post(
+          url,
+          { query, top_k_pages: topK },
+          { responseType: 'stream', timeout: 120000 },
+        );
+        return await this.consumeAisousuoSearchSse(stream, sideQueue);
       } catch (err: any) {
-        this.logger.warn(`AI Search SSE 失败，回退 JSON: ${err?.message}`);
+        this.logger.warn(`AI Search SSE 失败，回退同步 /search: ${err?.message}`);
       }
     }
     return this.aiSearch(query);
