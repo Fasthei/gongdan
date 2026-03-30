@@ -144,6 +144,8 @@ function AdminAccountSettings() {
   const [operatorForm] = Form.useForm();
   const [engLoading, setEngLoading] = React.useState(false);
   const [opLoading, setOpLoading] = React.useState(false);
+  const [kbLoading, setKbLoading] = React.useState(false);
+  const [kbMeta, setKbMeta] = React.useState({ platform: '', title: '' });
 
   const handleCreateEngineer = async (values: any) => {
     setEngLoading(true);
@@ -169,6 +171,25 @@ function AdminAccountSettings() {
     } finally {
       setOpLoading(false);
     }
+  };
+
+  const handleUploadKnowledge = async (file: File) => {
+    setKbLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (kbMeta.platform) formData.append('platform', kbMeta.platform);
+      if (kbMeta.title) formData.append('title', kbMeta.title);
+      await api.post('/knowledge-base/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      message.success('知识库资料上传成功');
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '知识库资料上传失败');
+    } finally {
+      setKbLoading(false);
+    }
+    return false;
   };
 
   return (
@@ -208,6 +229,31 @@ function AdminAccountSettings() {
         </Form.Item>
         <Button type="primary" htmlType="submit" loading={opLoading}>创建运营账户</Button>
       </Form>
+
+      <Divider />
+
+      <Typography.Title level={5}>上传知识库资料</Typography.Title>
+      <Input
+        placeholder="平台（可选，如 taiji/xm/original）"
+        value={kbMeta.platform}
+        onChange={(e) => setKbMeta({ ...kbMeta, platform: e.target.value })}
+        style={{ marginBottom: 8 }}
+      />
+      <Input
+        placeholder="标题（可选）"
+        value={kbMeta.title}
+        onChange={(e) => setKbMeta({ ...kbMeta, title: e.target.value })}
+        style={{ marginBottom: 12 }}
+      />
+      <input
+        type="file"
+        disabled={kbLoading}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) void handleUploadKnowledge(f);
+          e.currentTarget.value = '';
+        }}
+      />
     </div>
   );
 }

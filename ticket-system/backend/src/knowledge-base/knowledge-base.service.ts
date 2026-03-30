@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
+import FormData from 'form-data';
 
 export interface KBSearchResult {
   id: string;
@@ -116,5 +117,48 @@ export class KnowledgeBaseService {
    */
   async getRelatedArticles(description: string, platform?: string): Promise<KBSearchResult[]> {
     return this.search(description, { platform, topK: 5 });
+  }
+
+  async uploadDocument(file: any, metadata?: { platform?: string; title?: string }) {
+    if (!file) {
+      throw new Error('上传文件不能为空');
+    }
+
+    // Keep endpoint configurable because KB Agent versions may differ.
+    const uploadPath = this.config.get<string>('KB_AGENT_UPLOAD_PATH') || '/api/v1/upload';
+    const uploadUrl = `${this.baseUrl}${uploadPath}`;
+
+    if (!this.apiKey) {
+      this.logger.debug(`[Mock KB Upload] 文件: ${file.originalname}`);
+      return {
+        success: true,
+        mock: true,
+        fileName: file.originalname,
+        platform: metadata?.platform || '',
+        title: metadata?.title || '',
+      };
+    }
+
+    try {
+      const form = new FormData();
+      form.append('file', file.buffer, file.originalname);
+      if (metadata?.platform) form.append('platform', metadata.platform);
+      if (metadata?.title) form.append('title', metadata.title);
+
+      const { data } = await axios.post(uploadUrl, form, {
+        headers: {
+          ...form.getHeaders(),
+          'api-key': this.apiKey,
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 30000,
+      });
+
+      return data;
+    } catch (err: any) {
+      this.logger.error(`知识库资料上传失败: ${err.message}`);
+      throw new Error(err.response?.data?.message || '知识库资料上传失败');
+    }
   }
 }
