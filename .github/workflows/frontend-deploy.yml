@@ -8,10 +8,6 @@ on:
       - '.github/workflows/frontend-deploy.yml'
   workflow_dispatch:
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -25,22 +21,13 @@ jobs:
 
       - name: Install and Build
         working-directory: ticket-system/frontend
-        env:
-          VITE_API_BASE_URL: https://gongdan-b5fzbtgteqd5gzfb.eastasia-01.azurewebsites.net
         run: |
           npm install
           npm run build
 
-      - uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_A41936EDE47248FDB344FCE518B4E215 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4FD21C9C42B4452AB4E39476E76760CD }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6092945B90A1416DA54A488C84D44231 }}
-
-      - name: Deploy to Azure Static Web Apps
+      - name: Install SWA CLI and Deploy
+        env:
+          SWA_CLI_DEPLOYMENT_TOKEN: ${{ secrets.AZURE_SWA_TOKEN }}
         run: |
-          az staticwebapp deploy \
-            --name gongdan \
-            --resource-group gongdan \
-            --app-location ticket-system/frontend/dist \
-            --no-build
+          npm install -g @azure/static-web-apps-cli
+          swa deploy ticket-system/frontend/dist --env production
