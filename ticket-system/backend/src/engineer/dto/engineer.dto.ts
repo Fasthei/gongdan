@@ -58,3 +58,39 @@ export class CreateOperatorDto {
   @IsNotEmpty()
   password: string;
 }
+
+export class AdminUpdateEngineerDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  username?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsEnum(EngineerLevelEnum)
+  level?: EngineerLevelEnum;
+
+  @IsOptional()
+  @IsBoolean()
+  isAvailable?: boolean;
+}
+
+export class AdminResetPasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  newPassword: string;
+}
+
+export class AdminUpdateOperatorDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  username?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+}
