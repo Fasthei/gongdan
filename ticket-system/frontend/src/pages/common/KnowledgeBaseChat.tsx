@@ -120,7 +120,7 @@ export default function KnowledgeBaseChat() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', background: '#fff', margin: '-24px' }}>
       {/* Header */}
-      <div style={{ padding: '12px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '8px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => window.history.back()} />
           <Title level={5} style={{ margin: 0 }}>知识库对话</Title>
@@ -128,6 +128,7 @@ export default function KnowledgeBaseChat() {
         <Space>
           <Button
             icon={<ReloadOutlined />}
+            size="small"
             onClick={() => {
               setChat([]);
               setSources([]);
