@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { Card, Input, Button, Typography, Space, message, List, Tag } from 'antd';
+import { Card, Input, Button, Typography, Space, message, List, Tag, Spin } from 'antd';
 import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
 
 const { TextArea } = Input;
 const { Title, Text } = Typography;
 
-type ChatItem = { role: 'user' | 'assistant'; content: string };
+type ChatItem = { role: 'user' | 'assistant'; content: string; searchMode?: 'internal' | 'hybrid' };
 
 export default function KnowledgeBaseChat() {
   const { user } = useAuth();
@@ -15,8 +15,22 @@ export default function KnowledgeBaseChat() {
   const [verifiedCode, setVerifiedCode] = useState('');
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
-  const [chat, setChat] = useState<ChatItem[]>([]);
+  const [chat, setChat] = useState<ChatItem[]>(() => {
+    try {
+      const raw = localStorage.getItem('kb-chat-history');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
   const [sources, setSources] = useState<any[]>([]);
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem('kb-chat-session-id') || '');
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const [searchMode, setSearchMode] = useState<'internal' | 'hybrid'>(() => {
+    const v = localStorage.getItem('kb-chat-search-mode');
+    return v === 'hybrid' ? 'hybrid' : 'internal';
+  });
+  const [usedSearchMode, setUsedSearchMode] = useState<'internal' | 'hybrid'>('internal');
 
   const canAsk = useMemo(() => {
     if (isCustomer) return !!verifiedCode;
@@ -33,22 +47,32 @@ export default function KnowledgeBaseChat() {
     if (!question.trim()) return;
     if (!canAsk) return message.warning('客户请先输入并确认客户编号');
 
-    const userMsg: ChatItem = { role: 'user', content: question.trim() };
+    const userMsg: ChatItem = { role: 'user', content: question.trim(), searchMode };
     const nextChat = [...chat, userMsg];
     setChat(nextChat);
+    localStorage.setItem('kb-chat-history', JSON.stringify(nextChat));
     setQuestion('');
     setLoading(true);
 
     try {
-      const { data } = await api.post('/knowledge-base/smart-query', {
-        question: userMsg.content,
-        topK: 5,
-        history: nextChat.slice(-10),
+      const { data } = await api.post('/knowledge-base/chat', {
+        sessionId: sessionId || undefined,
+        message: userMsg.content,
+        searchMode,
         ...(isCustomer ? { customerCode: verifiedCode } : {}),
       });
       const answer = data?.answer || '未获取到答案';
-      setChat((prev) => [...prev, { role: 'assistant', content: answer }]);
+      const roundMode: 'internal' | 'hybrid' = data?.usedSearchMode === 'hybrid' ? 'hybrid' : 'internal';
+      const merged = [...nextChat, { role: 'assistant', content: answer, searchMode: roundMode } as ChatItem];
+      setChat(merged);
+      localStorage.setItem('kb-chat-history', JSON.stringify(merged));
+      if (data?.sessionId) {
+        setSessionId(data.sessionId);
+        localStorage.setItem('kb-chat-session-id', data.sessionId);
+      }
       setSources(Array.isArray(data?.sources) ? data.sources : []);
+      setFollowUps(Array.isArray(data?.followUps) ? data.followUps : []);
+      setUsedSearchMode(data?.usedSearchMode === 'hybrid' ? 'hybrid' : 'internal');
     } catch (err: any) {
       message.error(err.response?.data?.message || '知识库对话失败');
     } finally {
@@ -73,13 +97,35 @@ export default function KnowledgeBaseChat() {
       )}
 
       <List
-        bordered
         dataSource={chat}
         locale={{ emptyText: '开始提问，进行知识库对话' }}
         renderItem={(item) => (
           <List.Item>
-            <Text strong={item.role === 'user'}>{item.role === 'user' ? '你' : '知识库'}：</Text>
-            <Text>{item.content}</Text>
+            <div
+              style={{
+                width: '100%',
+                display: 'flex',
+                justifyContent: item.role === 'user' ? 'flex-end' : 'flex-start',
+              }}
+            >
+              <div
+                style={{
+                  maxWidth: '75%',
+                  background: item.role === 'user' ? '#1677ff' : '#f5f5f5',
+                  color: item.role === 'user' ? '#fff' : '#000',
+                  borderRadius: 12,
+                  padding: '10px 12px',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                <Text style={{ color: item.role === 'user' ? '#fff' : '#000' }}>{item.content}</Text>
+                {item.searchMode && (
+                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
+                    {item.searchMode === 'hybrid' ? '内部 + 外部' : '仅内部'}
+                  </div>
+                )}
+              </div>
+            </div>
           </List.Item>
         )}
         style={{ marginBottom: 12, maxHeight: 360, overflow: 'auto' }}
@@ -92,11 +138,41 @@ export default function KnowledgeBaseChat() {
         placeholder="输入问题后发送..."
       />
       <Space style={{ marginTop: 12 }}>
+        <Button
+          onClick={() => {
+            const next = searchMode === 'internal' ? 'hybrid' : 'internal';
+            setSearchMode(next);
+            localStorage.setItem('kb-chat-search-mode', next);
+          }}
+        >
+          {searchMode === 'hybrid' ? '已启用外部搜索' : '仅内部知识库'}
+        </Button>
         <Button type="primary" onClick={ask} loading={loading} disabled={!canAsk}>
           发送
         </Button>
-        <Button onClick={() => { setChat([]); setSources([]); }}>清空会话</Button>
+        <Button
+          onClick={() => {
+            setChat([]);
+            setSources([]);
+            setFollowUps([]);
+            setSessionId('');
+            localStorage.removeItem('kb-chat-history');
+            localStorage.removeItem('kb-chat-session-id');
+          }}
+        >
+          清空会话
+        </Button>
       </Space>
+      <div style={{ marginTop: 8 }}>
+        <Text type="secondary">
+          本轮来源：{usedSearchMode === 'hybrid' ? '内部知识库 + 外部搜索' : '仅内部知识库'}
+        </Text>
+      </div>
+      {loading && (
+        <div style={{ marginTop: 10 }}>
+          <Spin size="small" /> <Text type="secondary">正在思考中...</Text>
+        </div>
+      )}
 
       {sources.length > 0 && (
         <div style={{ marginTop: 16 }}>
@@ -110,6 +186,19 @@ export default function KnowledgeBaseChat() {
               </List.Item>
             )}
           />
+        </div>
+      )}
+
+      {followUps.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <Text strong>推荐追问：</Text>
+          <Space wrap style={{ marginTop: 6 }}>
+            {followUps.map((f, i) => (
+              <Button key={`${i}-${f}`} size="small" onClick={() => setQuestion(f)}>
+                {f}
+              </Button>
+            ))}
+          </Space>
         </div>
       )}
     </Card>

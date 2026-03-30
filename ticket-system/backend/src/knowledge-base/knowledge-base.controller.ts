@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors, Get, Param } from '@nestjs/common';
 import { KnowledgeBaseService } from './knowledge-base.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -63,5 +63,47 @@ export class KnowledgeBaseController {
       platform: body.platform,
       title: body.title,
     });
+  }
+
+  @Post('chat')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  async chat(
+    @Body() body: {
+      sessionId?: string;
+      message: string;
+      customerCode?: string;
+      searchMode?: 'internal' | 'hybrid';
+    },
+    @Request() req: any,
+  ) {
+    if (!body.message?.trim()) {
+      throw new ForbiddenException('消息不能为空');
+    }
+    if (req.user?.role === 'CUSTOMER') {
+      if (!body.customerCode) {
+        throw new ForbiddenException('客户使用知识库前请先输入客户编号');
+      }
+      const customer = await this.prisma.customer.findUnique({
+        where: { customerCode: body.customerCode },
+        select: { id: true },
+      });
+      if (!customer || customer.id !== req.user.customerId) {
+        throw new ForbiddenException('客户编号校验失败，无法使用知识库');
+      }
+    }
+    return this.kbService.chat({
+      sessionId: body.sessionId,
+      userId: req.user.id,
+      userRole: req.user.role,
+      customerCode: body.customerCode,
+      message: body.message.trim(),
+      searchMode: body.searchMode,
+    });
+  }
+
+  @Get('chat/:sessionId')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  getChatHistory(@Param('sessionId') sessionId: string, @Request() req: any) {
+    return this.kbService.getSessionMessages(sessionId, req.user.id);
   }
 }
