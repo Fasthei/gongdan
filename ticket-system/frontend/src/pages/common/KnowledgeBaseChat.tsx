@@ -22,13 +22,20 @@ import { useAuth } from '../../contexts/AuthContext';
 const { TextArea } = Input;
 const { Title, Text } = Typography;
 
-const CURL_EXAMPLE_TEMPLATE = `#!/usr/bin/env bash
-# 将下方 URL / Header / Body 换成客户的真实请求后，可在沙盒中复现
-set -e
-curl -sS -w "\\nHTTP_CODE:%{http_code}\\n" -X POST "https://api.example.com/v1/resource" \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer <token>" \\
-  -d '{"key":"value"}'
+/** 与 Postman「Copy as cURL」一致的多行格式；勿加 shebang、set -e、-w 等，避免与真实请求不一致 */
+const CURL_EXAMPLE_TEMPLATE = `curl --location 'https://YOUR_RESOURCE.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview' \\
+--header 'Content-Type: application/json' \\
+--header 'Authorization: Bearer <API_KEY>' \\
+--data '{
+        "messages": [
+            {
+                "role": "user",
+                "content": "你好"
+            }
+        ],
+        "max_completion_tokens": 16384,
+        "model": "你的部署名或模型名"
+    }'
 `;
 
 type ChatItem = { role: 'user' | 'assistant'; content: string; searchMode?: 'internal' | 'hybrid' };
@@ -732,13 +739,13 @@ export default function KnowledgeBaseChat() {
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(CURL_EXAMPLE_TEMPLATE);
-                    message.success('已复制 curl 示例模板');
+                    message.success('已复制 Postman 风格 curl 示例');
                   } catch {
                     message.error('复制失败，请手动选择模板文本');
                   }
                 }}
               >
-                复制请求示例模板
+                复制 curl 示例
               </Button>
               <Upload
                 accept=".sh,.bash,.txt,.http,.json"
@@ -764,13 +771,15 @@ export default function KnowledgeBaseChat() {
               </Upload>
             </Space>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              内容将作为 <code>bash /tmp/request.sh</code> 在 Daytona 隔离环境中执行。请使用可执行的 shell（含 curl / wget 等），勿包含交互式命令。
+              将<strong>原样粘贴</strong> Postman「Copy as cURL」或同类工具导出的多行命令即可；系统写入沙盒后执行{' '}
+              <code>bash /tmp/request.sh</code>。<strong>无需</strong>自行加 <code>#!/bin/bash</code>、<code>set -e</code>、
+              <code>-w HTTP_CODE</code> 等额外参数，以免与真实请求不一致。勿含交互式命令。
             </Text>
             <TextArea
               rows={14}
               value={requestExampleText}
               onChange={(e) => setRequestExampleText(e.target.value)}
-              placeholder="粘贴客户的 curl、shell 脚本或 HTTP 草稿…"
+              placeholder="粘贴 Postman / Insomnia 导出的 curl（--location、--header、--data 多行格式）…"
               disabled={!sandboxMode}
             />
           </Space>
