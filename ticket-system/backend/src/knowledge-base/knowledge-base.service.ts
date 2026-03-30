@@ -52,7 +52,7 @@ export class KnowledgeBaseService {
     this.apiKey = this.config.get<string>('KB_AGENT_API_KEY') || '';
     this.aiSearchBaseUrl =
       this.config.get<string>('AI_SEARCH_AGENT_URL') ||
-      'https://aisousuo.azurewebsites.net/api';
+      'https://aisousuo-gxe7hphbduetgqam.eastasia-01.azurewebsites.net/api';
     this.llmBaseUrl = this.config.get<string>('LLM_BASE_URL') || 'https://api.taijiaicloud.com/v1';
     this.llmApiKey = this.config.get<string>('LLM_API_KEY') || '';
     this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'claude-sonnet-4-6';
