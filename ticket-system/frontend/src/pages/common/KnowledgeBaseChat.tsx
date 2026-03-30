@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Segmented } from 'antd';
-import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined } from '@ant-design/icons';
+import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../../api/axios';
@@ -46,6 +46,22 @@ export default function KnowledgeBaseChat() {
     setVerifiedCode(customerCode.trim());
     message.success('客户编号已确认，可以开始知识库对话');
   };
+
+  useEffect(() => {
+    // 组件挂载时，如果有 sessionId，尝试从后端拉取历史记录
+    if (sessionId) {
+      api.get(`/knowledge-base/chat/${sessionId}`)
+        .then(({ data }) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setChat(data);
+            localStorage.setItem('kb-chat-history', JSON.stringify(data));
+          }
+        })
+        .catch(() => {
+          // 忽略错误，降级使用本地缓存
+        });
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     if (messagesRef.current) {
@@ -94,9 +110,10 @@ export default function KnowledgeBaseChat() {
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', background: '#fff', margin: '-24px' }}>
       {/* Header */}
       <div style={{ padding: '12px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => window.history.back()} />
           <Title level={5} style={{ margin: 0 }}>知识库对话</Title>
-        </div>
+        </Space>
         <Space>
           <Segmented<'internal' | 'hybrid'>
             value={searchMode}
@@ -143,7 +160,7 @@ export default function KnowledgeBaseChat() {
       ) : (
         <>
           {/* Messages Area */}
-          <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth' }}>
+          <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth', overflowX: 'hidden' }}>
             <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 24px' }}>
               {chat.length === 0 && !loading && (
                 <div style={{ textAlign: 'center', marginTop: '10vh', color: '#8e8e8e' }}>
@@ -169,7 +186,7 @@ export default function KnowledgeBaseChat() {
                         <div style={{ fontWeight: 500, marginBottom: 4, color: '#202124' }}>
                           {item.role === 'user' ? '您' : '知识库助手'}
                         </div>
-                        <div className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6 }}>
+                        <div className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                           {item.role === 'user' ? (
                             <div style={{ whiteSpace: 'pre-wrap' }}>{item.content}</div>
                           ) : (
