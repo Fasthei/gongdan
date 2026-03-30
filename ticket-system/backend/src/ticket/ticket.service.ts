@@ -3,10 +3,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateTicketDto } from './dto/ticket.dto';
 import { validateTransition, getTimestampUpdates } from './ticket-state-machine';
 import { calculateSlaDeadline, generateTicketNumber } from '../common/utils';
+import { NotificationService } from '../notification/notification.service';
 
 @Injectable()
 export class TicketService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationService: NotificationService,
+  ) {}
 
   // 工单内容不可变字段列表
   private readonly IMMUTABLE_FIELDS = ['platform', 'accountInfo', 'modelUsed', 'description', 'requestExample'];
@@ -24,7 +28,7 @@ export class TicketService {
     const ticketNumber = generateTicketNumber();
     const priority = customer.tier === 'EXCLUSIVE' ? 'EXCLUSIVE' : customer.tier === 'KEY' ? 'PRIORITY' : 'NORMAL';
 
-    return this.prisma.ticket.create({
+    const createdTicket = await this.prisma.ticket.create({
       data: {
         ticketNumber,
         customerId,
@@ -46,6 +50,19 @@ export class TicketService {
       },
       include: { customer: { select: { name: true, tier: true } } },
     });
+
+    await this.notificationService.publishEvent({
+      type: 'ticket.created',
+      ticketId: createdTicket.id,
+      ticketNumber: createdTicket.ticketNumber,
+      payload: {
+        customerId: createdTicket.customerId,
+        createdByRole: createdTicket.createdByRole,
+        priority: createdTicket.priority,
+      },
+    });
+
+    return createdTicket;
   }
 
   async createForCustomer(dto: CreateTicketDto, customerId: string, operatorId: string) {
@@ -56,7 +73,7 @@ export class TicketService {
     const ticketNumber = generateTicketNumber();
     const priority = customer.tier === 'EXCLUSIVE' ? 'EXCLUSIVE' : customer.tier === 'KEY' ? 'PRIORITY' : 'NORMAL';
 
-    return this.prisma.ticket.create({
+    const createdTicket = await this.prisma.ticket.create({
       data: {
         ticketNumber,
         customerId,
@@ -77,6 +94,19 @@ export class TicketService {
         engineerLevel: dto.requestedLevel as any,
       },
     });
+
+    await this.notificationService.publishEvent({
+      type: 'ticket.created',
+      ticketId: createdTicket.id,
+      ticketNumber: createdTicket.ticketNumber,
+      payload: {
+        customerId: createdTicket.customerId,
+        createdByRole: createdTicket.createdByRole,
+        priority: createdTicket.priority,
+      },
+    });
+
+    return createdTicket;
   }
 
   async findAll(user: any, page = 1, pageSize = 20, status?: string) {
@@ -190,10 +220,22 @@ export class TicketService {
     if (!ticket) throw new NotFoundException('工单不存在');
     if (ticket.status !== 'PENDING_CLOSE') throw new BadRequestException('工单不在待关闭状态');
 
-    return this.prisma.ticket.update({
+    const closedTicket = await this.prisma.ticket.update({
       where: { id: ticketId },
       data: { status: 'CLOSED', closedAt: new Date(), closeApprovedAt: new Date(), closeApprovedBy: operatorId },
     });
+
+    await this.notificationService.publishEvent({
+      type: 'ticket.closed',
+      ticketId: closedTicket.id,
+      ticketNumber: closedTicket.ticketNumber,
+      payload: {
+        approvedBy: operatorId,
+        customerId: closedTicket.customerId,
+      },
+    });
+
+    return closedTicket;
   }
 
   async rejectClose(ticketId: string, operatorId: string) {

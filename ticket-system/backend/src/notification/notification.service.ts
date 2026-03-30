@@ -32,6 +32,9 @@ export class NotificationService {
       await sender.sendMessages({ body: event, contentType: 'application/json' });
       await sender.close();
       await client.close();
+      // Also notify Teams directly so operators can see events
+      // even when no downstream consumer handles the queue.
+      await this.sendTeamsNotification(event);
     } catch (err) {
       this.logger.error(`Service Bus 发布失败: ${err.message}`, err.stack);
       // 降级：直接发 Teams
