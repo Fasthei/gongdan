@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'ticket-system/backend/**'
+      - '.github/workflows/backend-deploy.yml'
   workflow_dispatch:
 
 jobs:
@@ -20,20 +21,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: ticket-system/backend/package-lock.json
 
-      - run: npm ci
+      - run: npm install
       - run: npx prisma generate
       - run: npm run build
 
       - name: Package for deployment
         run: |
-          cp -r dist ../deploy
-          cp package.json package-lock.json ../deploy/
-          cp -r prisma ../deploy/prisma
-          cd ../deploy
-          npm ci --omit=dev
+          mkdir -p ../../deploy
+          cp -r dist ../../deploy/
+          cp package.json ../../deploy/
+          cp -r prisma ../../deploy/prisma
+          cd ../../deploy
+          npm install --omit=dev
           npx prisma generate
           zip -r ../backend.zip .
 
@@ -41,4 +41,4 @@ jobs:
         with:
           app-name: gongdan
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: ticket-system/backend.zip
+          package: backend.zip
