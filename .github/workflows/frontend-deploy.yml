@@ -8,6 +8,10 @@ on:
       - '.github/workflows/frontend-deploy.yml'
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -27,10 +31,16 @@ jobs:
           npm install
           npm run build
 
-      - uses: Azure/static-web-apps-deploy@v1
+      - uses: azure/login@v2
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_SWA_TOKEN }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: upload
-          app_location: ticket-system/frontend/dist
-          skip_app_build: true
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_A41936EDE47248FDB344FCE518B4E215 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4FD21C9C42B4452AB4E39476E76760CD }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_6092945B90A1416DA54A488C84D44231 }}
+
+      - name: Deploy to Azure Static Web Apps
+        run: |
+          az staticwebapp deploy \
+            --name gongdan \
+            --resource-group gongdan \
+            --app-location ticket-system/frontend/dist \
+            --no-build
