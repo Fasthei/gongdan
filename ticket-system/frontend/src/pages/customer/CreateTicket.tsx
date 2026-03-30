@@ -3,6 +3,7 @@ import { Form, Input, Select, Button, Card, Upload, message, Typography, Space }
 import { UploadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
+import { useAuth } from '../../contexts/AuthContext';
 
 const { Title } = Typography;
 const { TextArea } = Input;
@@ -13,6 +14,8 @@ export default function CreateTicket() {
   const [loading, setLoading] = useState(false);
   const [attachmentUrls, setAttachmentUrls] = useState<string[]>([]);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canSelectEngineerLevel = user?.role === 'CUSTOMER' && user?.tier !== 'NORMAL';
 
   const handleUpload = async (file: File) => {
     try {
@@ -31,7 +34,11 @@ export default function CreateTicket() {
   const onFinish = async (values: any) => {
     setLoading(true);
     try {
-      await api.post('/tickets', { ...values, attachmentUrls });
+      const payload = { ...values, attachmentUrls };
+      if (!canSelectEngineerLevel) {
+        delete payload.requestedLevel;
+      }
+      await api.post('/tickets', payload);
       message.success('工单提交成功');
       navigate('/tickets');
     } catch (err: any) {
@@ -91,13 +98,15 @@ export default function CreateTicket() {
             <Input placeholder="邮箱或手机号" />
           </Form.Item>
 
-          <Form.Item name="requestedLevel" label="期望工程师级别（选填）">
-            <Select placeholder="不选则由系统自动分配" allowClear>
-              <Option value="L1">L1 工程师（常规问题）</Option>
-              <Option value="L2">L2 高级工程师（复杂问题）</Option>
-              <Option value="L3">L3 专家（架构级问题）</Option>
-            </Select>
-          </Form.Item>
+          {canSelectEngineerLevel && (
+            <Form.Item name="requestedLevel" label="期望工程师级别（选填）">
+              <Select placeholder="不选则由系统自动分配" allowClear>
+                <Option value="L1">L1 工程师（常规问题）</Option>
+                <Option value="L2">L2 高级工程师（复杂问题）</Option>
+                <Option value="L3">L3 专家（架构级问题）</Option>
+              </Select>
+            </Form.Item>
+          )}
 
           <Form.Item label="上传附件（选填）">
             <Upload beforeUpload={handleUpload} showUploadList={false} multiple>

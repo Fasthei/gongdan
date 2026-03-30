@@ -20,6 +20,10 @@ export class CreateEngineerDto {
 
   @IsEnum(EngineerLevelEnum)
   level: EngineerLevelEnum;
+
+  @IsOptional()
+  @IsBoolean()
+  isAdmin?: boolean;
 }
 
 export class UpdateAvailabilityDto {
@@ -30,4 +34,27 @@ export class UpdateAvailabilityDto {
 export class UpdateEngineerEmailDto {
   @IsEmail()
   email: string;
+}
+
+export class ChangePasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  oldPassword: string;
+
+  @IsString()
+  @IsNotEmpty()
+  newPassword: string;
+}
+
+export class CreateOperatorDto {
+  @IsString()
+  @IsNotEmpty()
+  username: string;
+
+  @IsEmail()
+  email: string;
+
+  @IsString()
+  @IsNotEmpty()
+  password: string;
 }

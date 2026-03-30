@@ -6,6 +6,7 @@ interface User {
   username?: string;
   name?: string;
   customerCode?: string;
+  tier?: 'NORMAL' | 'KEY' | 'EXCLUSIVE';
   level?: string;
 }
 

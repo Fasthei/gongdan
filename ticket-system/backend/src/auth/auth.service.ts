@@ -17,7 +17,13 @@ export class AuthService {
     if (!customer) throw new UnauthorizedException('客户编号无效，请联系运营');
 
     const payload = { sub: customer.id, role: 'CUSTOMER', customerId: customer.id };
-    return this.signTokens(payload, { id: customer.id, role: 'CUSTOMER', name: customer.name, customerCode: customer.customerCode });
+    return this.signTokens(payload, {
+      id: customer.id,
+      role: 'CUSTOMER',
+      name: customer.name,
+      customerCode: customer.customerCode,
+      tier: customer.tier,
+    });
   }
 
   async staffLogin(username: string, password: string) {

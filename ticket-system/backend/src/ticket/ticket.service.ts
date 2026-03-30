@@ -23,6 +23,9 @@ export class TicketService {
 
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) throw new NotFoundException('客户不存在');
+    if (customer.tier === 'NORMAL' && dto.requestedLevel) {
+      throw new BadRequestException('普通客户不支持选择支持工程师等级');
+    }
 
     const slaDeadline = calculateSlaDeadline(customer.tier as any, new Date());
     const ticketNumber = generateTicketNumber();
@@ -68,6 +71,9 @@ export class TicketService {
   async createForCustomer(dto: CreateTicketDto, customerId: string, operatorId: string) {
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) throw new NotFoundException('客户不存在');
+    if (customer.tier === 'NORMAL' && dto.requestedLevel) {
+      throw new BadRequestException('普通客户不支持选择支持工程师等级');
+    }
 
     const slaDeadline = calculateSlaDeadline(customer.tier as any, new Date());
     const ticketNumber = generateTicketNumber();
