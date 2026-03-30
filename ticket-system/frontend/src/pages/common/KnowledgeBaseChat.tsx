@@ -115,17 +115,6 @@ export default function KnowledgeBaseChat() {
           <Title level={5} style={{ margin: 0 }}>知识库对话</Title>
         </Space>
         <Space>
-          <Segmented<'internal' | 'hybrid'>
-            value={searchMode}
-            options={[
-              { label: '仅内部', value: 'internal' },
-              { label: '内部+外部', value: 'hybrid' },
-            ]}
-            onChange={(val) => {
-              setSearchMode(val);
-              localStorage.setItem('kb-chat-search-mode', val);
-            }}
-          />
           <Button
             icon={<ReloadOutlined />}
             onClick={() => {
@@ -161,95 +150,123 @@ export default function KnowledgeBaseChat() {
         <>
           {/* Messages Area */}
           <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth', overflowX: 'hidden' }}>
-            <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 24px' }}>
-              {chat.length === 0 && !loading && (
-                <div style={{ textAlign: 'center', marginTop: '10vh', color: '#8e8e8e' }}>
-                  <RobotOutlined style={{ fontSize: 48, marginBottom: 16, opacity: 0.2 }} />
-                  <Title level={3} style={{ color: '#d9d9d9', fontWeight: 400 }}>今天能帮您解决什么问题？</Title>
-                </div>
-              )}
-              <List
-                dataSource={chat}
-                split={false}
-                renderItem={(item) => (
-                  <List.Item style={{ padding: '16px 0' }}>
-                    <div style={{ width: '100%', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                      <Avatar
-                        icon={item.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
-                        style={{ 
-                          background: item.role === 'user' ? '#1a73e8' : '#10a37f', 
-                          flex: '0 0 auto',
-                          marginTop: 4
-                        }}
-                      />
-                      <div style={{ width: '100%', overflow: 'hidden' }}>
-                        <div style={{ fontWeight: 500, marginBottom: 4, color: '#202124' }}>
-                          {item.role === 'user' ? '您' : '知识库助手'}
-                        </div>
-                        <div className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
-                          {item.role === 'user' ? (
-                            <div style={{ whiteSpace: 'pre-wrap' }}>{item.content}</div>
-                          ) : (
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+            <div style={{ display: 'flex', maxWidth: 1200, margin: '0 auto', gap: 24, padding: '0 24px' }}>
+              {/* Main Chat Stream */}
+              <div style={{ flex: 1, maxWidth: 800 }}>
+                {chat.length === 0 && !loading && (
+                  <div style={{ textAlign: 'center', marginTop: '10vh', color: '#8e8e8e' }}>
+                    <RobotOutlined style={{ fontSize: 48, marginBottom: 16, opacity: 0.2 }} />
+                    <Title level={3} style={{ color: '#d9d9d9', fontWeight: 400 }}>今天能帮您解决什么问题？</Title>
+                  </div>
+                )}
+                <List
+                  dataSource={chat}
+                  split={false}
+                  renderItem={(item) => (
+                    <List.Item style={{ padding: '16px 0' }}>
+                      <div style={{ width: '100%', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                        <Avatar
+                          icon={item.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                          style={{ 
+                            background: item.role === 'user' ? '#1a73e8' : '#10a37f', 
+                            flex: '0 0 auto',
+                            marginTop: 4
+                          }}
+                        />
+                        <div style={{ width: '100%', overflow: 'hidden' }}>
+                          <div style={{ fontWeight: 500, marginBottom: 4, color: '#202124' }}>
+                            {item.role === 'user' ? '您' : '知识库助手'}
+                          </div>
+                          <div className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                            {item.role === 'user' ? (
+                              <div style={{ whiteSpace: 'pre-wrap' }}>{item.content}</div>
+                            ) : (
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+                            )}
+                          </div>
+                          {item.searchMode && (
+                            <div style={{ marginTop: 8 }}>
+                              <Tag bordered={false} color="default" style={{ fontSize: 12, borderRadius: 4 }}>
+                                {item.searchMode === 'hybrid' ? '检索来源: AI 搜索' : '检索来源: 仅内部'}
+                              </Tag>
+                            </div>
                           )}
                         </div>
-                        {item.searchMode && (
-                          <div style={{ marginTop: 8 }}>
-                            <Tag bordered={false} color="default" style={{ fontSize: 12, borderRadius: 4 }}>
-                              {item.searchMode === 'hybrid' ? '检索来源: 内部 + 外部' : '检索来源: 仅内部'}
-                            </Tag>
-                          </div>
-                        )}
                       </div>
+                    </List.Item>
+                  )}
+                />
+                {loading && (
+                  <div style={{ padding: '16px 0', display: 'flex', gap: 16 }}>
+                    <Avatar icon={<RobotOutlined />} style={{ background: '#10a37f', flex: '0 0 auto' }} />
+                    <div style={{ paddingTop: 6 }}>
+                      <Spin size="small" /> <Text type="secondary" style={{ marginLeft: 8 }}>正在思考并检索...</Text>
                     </div>
-                  </List.Item>
-                )}
-              />
-              {loading && (
-                <div style={{ padding: '16px 0', display: 'flex', gap: 16 }}>
-                  <Avatar icon={<RobotOutlined />} style={{ background: '#10a37f', flex: '0 0 auto' }} />
-                  <div style={{ paddingTop: 6 }}>
-                    <Spin size="small" /> <Text type="secondary" style={{ marginLeft: 8 }}>正在思考并检索...</Text>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+
+              {/* Right Sidebar for Sources & Follow-ups */}
+              <div style={{ width: 300, flexShrink: 0, display: chat.length > 0 || loading ? 'block' : 'none' }}>
+                {loading && (
+                  <div style={{ marginBottom: 24, padding: 16, background: '#f8f9fa', borderRadius: 12 }}>
+                    <Text strong style={{ display: 'block', marginBottom: 12 }}>思考状态</Text>
+                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 分析问题中...</Text>
+                      {usedSearchMode === 'hybrid' && <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 调用 AI 搜索 Agent...</Text>}
+                      <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 检索内部知识库...</Text>
+                    </Space>
+                  </div>
+                )}
+
+                {sources.length > 0 && (
+                  <div style={{ marginBottom: 24 }}>
+                    <Text strong style={{ display: 'block', marginBottom: 12 }}>参考资料</Text>
+                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      {sources.map((s: any, idx) => (
+                        <div key={idx} style={{ background: '#f1f3f4', padding: '8px 12px', borderRadius: 8 }}>
+                          <Text style={{ fontSize: 13, display: 'block', fontWeight: 500 }} ellipsis={{ tooltip: s.title }}>
+                            {s.title || '未命名资料'}
+                          </Text>
+                          {s.platform && <Text type="secondary" style={{ fontSize: 12 }}>来源: {s.platform}</Text>}
+                        </div>
+                      ))}
+                    </Space>
+                  </div>
+                )}
+
+                {followUps.length > 0 && (
+                  <div>
+                    <Text strong style={{ display: 'block', marginBottom: 12 }}>推荐追问</Text>
+                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      {followUps.map((f, i) => (
+                        <Button 
+                          key={`${i}-${f}`} 
+                          size="small" 
+                          style={{ width: '100%', textAlign: 'left', height: 'auto', whiteSpace: 'normal', padding: '6px 12px' }} 
+                          onClick={() => setQuestion(f)}
+                        >
+                          {f}
+                        </Button>
+                      ))}
+                    </Space>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           {/* Input Area */}
           <div style={{ padding: '0 24px 24px', background: 'linear-gradient(180deg, rgba(255,255,255,0) 0%, #fff 20%)' }}>
-            <div style={{ maxWidth: 800, margin: '0 auto' }}>
-              {sources.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <Text type="secondary" style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>参考资料</Text>
-                  <Space wrap size={[0, 8]}>
-                    {sources.map((s: any, idx) => (
-                      <Tag key={idx} bordered={false} style={{ background: '#f1f3f4', borderRadius: 12, padding: '2px 10px' }}>
-                        {s.title || '未命名资料'}{s.platform ? ` (${s.platform})` : ''}
-                      </Tag>
-                    ))}
-                  </Space>
-                </div>
-              )}
-
-              {followUps.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <Space wrap size={[8, 8]}>
-                    {followUps.map((f, i) => (
-                      <Button key={`${i}-${f}`} size="small" shape="round" onClick={() => setQuestion(f)}>
-                        {f}
-                      </Button>
-                    ))}
-                  </Space>
-                </div>
-              )}
-
+            <div style={{ maxWidth: 800, margin: '0 auto', marginLeft: 'calc(50% - 600px + 24px)', '@media (max-width: 1200px)': { marginLeft: 'auto' } } as any}>
               <div style={{ 
                 position: 'relative', 
                 boxShadow: '0 2px 6px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.05)', 
                 borderRadius: 24,
                 background: '#fff',
-                padding: '8px 16px'
+                padding: '8px 16px',
+                display: 'flex',
+                flexDirection: 'column'
               }}>
                 <TextArea
                   autoSize={{ minRows: 1, maxRows: 6 }}
@@ -257,7 +274,7 @@ export default function KnowledgeBaseChat() {
                   onChange={(e) => setQuestion(e.target.value)}
                   placeholder="给知识库发送消息..."
                   bordered={false}
-                  style={{ paddingRight: 40, resize: 'none', boxShadow: 'none' }}
+                  style={{ resize: 'none', boxShadow: 'none', marginBottom: 36 }}
                   onPressEnter={(e) => {
                     if (!e.shiftKey) {
                       e.preventDefault();
@@ -265,15 +282,28 @@ export default function KnowledgeBaseChat() {
                     }
                   }}
                 />
-                <Button 
-                  type="primary" 
-                  shape="circle" 
-                  icon={<SendOutlined />} 
-                  onClick={ask} 
-                  loading={loading} 
-                  disabled={!question.trim() || !canAsk}
-                  style={{ position: 'absolute', right: 8, bottom: 8 }}
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'absolute', bottom: 8, left: 16, right: 8 }}>
+                  <Segmented<'internal' | 'hybrid'>
+                    value={searchMode}
+                    options={[
+                      { label: '仅内部', value: 'internal' },
+                      { label: 'AI 搜索', value: 'hybrid' },
+                    ]}
+                    onChange={(val) => {
+                      setSearchMode(val);
+                      localStorage.setItem('kb-chat-search-mode', val);
+                    }}
+                    size="small"
+                  />
+                  <Button 
+                    type="primary" 
+                    shape="circle" 
+                    icon={<SendOutlined />} 
+                    onClick={ask} 
+                    loading={loading} 
+                    disabled={!question.trim() || !canAsk}
+                  />
+                </div>
               </div>
               <div style={{ textAlign: 'center', marginTop: 8 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
