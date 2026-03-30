@@ -73,16 +73,16 @@ export default function EngineerTicketDetail() {
   if (!ticket) return <Alert message="工单不存在" type="error" style={{ margin: 24 }} />;
 
   return (
-    <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-      <Space style={{ marginBottom: 16 }}>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px' }}>
+      <Space style={{ marginBottom: 24 }}>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/engineer')}>返回</Button>
         <Title level={4} style={{ margin: 0 }}>{ticket.ticketNumber}</Title>
         <Tag color={STATUS_MAP[ticket.status]?.color}>{STATUS_MAP[ticket.status]?.label}</Tag>
       </Space>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24 }}>
         <div>
-          <Card title="工单详情" style={{ marginBottom: 16 }}>
+          <Card title="工单详情" bordered={false} style={{ marginBottom: 24 }}>
             <Descriptions column={2} bordered size="small">
               <Descriptions.Item label="平台">{ticket.platform}</Descriptions.Item>
               <Descriptions.Item label="模型">{ticket.modelUsed}</Descriptions.Item>
@@ -105,7 +105,7 @@ export default function EngineerTicketDetail() {
             </Descriptions>
           </Card>
 
-          <Card title="操作">
+          <Card title="操作" bordered={false}>
             <Space>
               {ticket.status === 'ACCEPTED' && (
                 <Button type="primary" onClick={() => handleStatusUpdate('IN_PROGRESS')}>开始处理</Button>
@@ -121,6 +121,7 @@ export default function EngineerTicketDetail() {
 
         <div>
           <Card
+            bordered={false}
             title={<Space><BulbOutlined />知识库建议</Space>}
             extra={<Button size="small" onClick={searchKB} loading={kbLoading}>搜索</Button>}
           >

@@ -40,7 +40,7 @@ export default function CustomerTicketDetail() {
 
       {isOverdue && <Alert message="该工单已超出 SLA 时限，请联系运营催单" type="warning" showIcon style={{ marginBottom: 16 }} />}
 
-      <Card style={{ marginBottom: 16 }}>
+      <Card bordered={false} style={{ marginBottom: 16 }}>
         <Steps
           current={currentStep}
           items={STATUS_STEPS.map((s) => ({ title: STATUS_LABEL[s] }))}
@@ -48,7 +48,7 @@ export default function CustomerTicketDetail() {
         />
       </Card>
 
-      <Card title="工单信息" style={{ marginBottom: 16 }}>
+      <Card title="工单信息" bordered={false} style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="平台">{PLATFORM_LABEL[ticket.platform] || ticket.platform}</Descriptions.Item>
           <Descriptions.Item label="使用模型">{ticket.modelUsed}</Descriptions.Item>
@@ -61,7 +61,7 @@ export default function CustomerTicketDetail() {
         </Descriptions>
       </Card>
 
-      <Card title="处理信息">
+      <Card title="处理信息" bordered={false}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="负责工程师">
             {ticket.assignedEngineer ? `${ticket.assignedEngineer.username} (${ticket.assignedEngineer.level})` : '待分配'}

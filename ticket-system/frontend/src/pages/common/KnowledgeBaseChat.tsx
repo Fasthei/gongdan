@@ -1,5 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import { Card, Input, Button, Typography, Space, message, List, Tag, Spin } from 'antd';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Segmented } from 'antd';
+import { RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined } from '@ant-design/icons';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -31,6 +34,7 @@ export default function KnowledgeBaseChat() {
     return v === 'hybrid' ? 'hybrid' : 'internal';
   });
   const [usedSearchMode, setUsedSearchMode] = useState<'internal' | 'hybrid'>('internal');
+  const messagesRef = useRef<HTMLDivElement | null>(null);
 
   const canAsk = useMemo(() => {
     if (isCustomer) return !!verifiedCode;
@@ -42,6 +46,12 @@ export default function KnowledgeBaseChat() {
     setVerifiedCode(customerCode.trim());
     message.success('客户编号已确认，可以开始知识库对话');
   };
+
+  useEffect(() => {
+    if (messagesRef.current) {
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+    }
+  }, [chat, loading]);
 
   const ask = async () => {
     if (!question.trim()) return;
@@ -81,126 +91,182 @@ export default function KnowledgeBaseChat() {
   };
 
   return (
-    <Card>
-      <Title level={4}>知识库对话</Title>
-      {isCustomer && (
-        <Space style={{ marginBottom: 12 }}>
-          <Input
-            value={customerCode}
-            onChange={(e) => setCustomerCode(e.target.value)}
-            placeholder="请输入客户编号（必填）"
-            style={{ width: 280 }}
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)', background: '#fff', margin: '-24px' }}>
+      {/* Header */}
+      <div style={{ padding: '12px 24px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <Title level={5} style={{ margin: 0 }}>知识库对话</Title>
+        </div>
+        <Space>
+          <Segmented<'internal' | 'hybrid'>
+            value={searchMode}
+            options={[
+              { label: '仅内部', value: 'internal' },
+              { label: '内部+外部', value: 'hybrid' },
+            ]}
+            onChange={(val) => {
+              setSearchMode(val);
+              localStorage.setItem('kb-chat-search-mode', val);
+            }}
           />
-          <Button onClick={verifyCode}>确认编号</Button>
-          {verifiedCode && <Tag color="green">已确认：{verifiedCode}</Tag>}
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              setChat([]);
+              setSources([]);
+              setFollowUps([]);
+              setSessionId('');
+              localStorage.removeItem('kb-chat-history');
+              localStorage.removeItem('kb-chat-session-id');
+            }}
+          >
+            新会话
+          </Button>
         </Space>
-      )}
+      </div>
 
-      <List
-        dataSource={chat}
-        locale={{ emptyText: '开始提问，进行知识库对话' }}
-        renderItem={(item) => (
-          <List.Item>
-            <div
-              style={{
-                width: '100%',
-                display: 'flex',
-                justifyContent: item.role === 'user' ? 'flex-end' : 'flex-start',
-              }}
-            >
-              <div
-                style={{
-                  maxWidth: '75%',
-                  background: item.role === 'user' ? '#1677ff' : '#f5f5f5',
-                  color: item.role === 'user' ? '#fff' : '#000',
-                  borderRadius: 12,
-                  padding: '10px 12px',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                <Text style={{ color: item.role === 'user' ? '#fff' : '#000' }}>{item.content}</Text>
-                {item.searchMode && (
-                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-                    {item.searchMode === 'hybrid' ? '内部 + 外部' : '仅内部'}
-                  </div>
+      {isCustomer && !verifiedCode ? (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' }}>
+          <div style={{ background: '#fff', padding: 40, borderRadius: 16, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', textAlign: 'center' }}>
+            <Title level={4} style={{ marginBottom: 24 }}>验证客户身份</Title>
+            <Space direction="vertical" size="large" style={{ width: 300 }}>
+              <Input
+                size="large"
+                value={customerCode}
+                onChange={(e) => setCustomerCode(e.target.value)}
+                placeholder="请输入您的客户编号"
+              />
+              <Button type="primary" size="large" block onClick={verifyCode}>开始对话</Button>
+            </Space>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Messages Area */}
+          <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 0', scrollBehavior: 'smooth' }}>
+            <div style={{ maxWidth: 800, margin: '0 auto', padding: '0 24px' }}>
+              {chat.length === 0 && !loading && (
+                <div style={{ textAlign: 'center', marginTop: '10vh', color: '#8e8e8e' }}>
+                  <RobotOutlined style={{ fontSize: 48, marginBottom: 16, opacity: 0.2 }} />
+                  <Title level={3} style={{ color: '#d9d9d9', fontWeight: 400 }}>今天能帮您解决什么问题？</Title>
+                </div>
+              )}
+              <List
+                dataSource={chat}
+                split={false}
+                renderItem={(item) => (
+                  <List.Item style={{ padding: '16px 0' }}>
+                    <div style={{ width: '100%', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                      <Avatar
+                        icon={item.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
+                        style={{ 
+                          background: item.role === 'user' ? '#1a73e8' : '#10a37f', 
+                          flex: '0 0 auto',
+                          marginTop: 4
+                        }}
+                      />
+                      <div style={{ width: '100%', overflow: 'hidden' }}>
+                        <div style={{ fontWeight: 500, marginBottom: 4, color: '#202124' }}>
+                          {item.role === 'user' ? '您' : '知识库助手'}
+                        </div>
+                        <div className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6 }}>
+                          {item.role === 'user' ? (
+                            <div style={{ whiteSpace: 'pre-wrap' }}>{item.content}</div>
+                          ) : (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+                          )}
+                        </div>
+                        {item.searchMode && (
+                          <div style={{ marginTop: 8 }}>
+                            <Tag bordered={false} color="default" style={{ fontSize: 12, borderRadius: 4 }}>
+                              {item.searchMode === 'hybrid' ? '检索来源: 内部 + 外部' : '检索来源: 仅内部'}
+                            </Tag>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </List.Item>
                 )}
+              />
+              {loading && (
+                <div style={{ padding: '16px 0', display: 'flex', gap: 16 }}>
+                  <Avatar icon={<RobotOutlined />} style={{ background: '#10a37f', flex: '0 0 auto' }} />
+                  <div style={{ paddingTop: 6 }}>
+                    <Spin size="small" /> <Text type="secondary" style={{ marginLeft: 8 }}>正在思考并检索...</Text>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Input Area */}
+          <div style={{ padding: '0 24px 24px', background: 'linear-gradient(180deg, rgba(255,255,255,0) 0%, #fff 20%)' }}>
+            <div style={{ maxWidth: 800, margin: '0 auto' }}>
+              {sources.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <Text type="secondary" style={{ fontSize: 12, marginBottom: 4, display: 'block' }}>参考资料</Text>
+                  <Space wrap size={[0, 8]}>
+                    {sources.map((s: any, idx) => (
+                      <Tag key={idx} bordered={false} style={{ background: '#f1f3f4', borderRadius: 12, padding: '2px 10px' }}>
+                        {s.title || '未命名资料'}{s.platform ? ` (${s.platform})` : ''}
+                      </Tag>
+                    ))}
+                  </Space>
+                </div>
+              )}
+
+              {followUps.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <Space wrap size={[8, 8]}>
+                    {followUps.map((f, i) => (
+                      <Button key={`${i}-${f}`} size="small" shape="round" onClick={() => setQuestion(f)}>
+                        {f}
+                      </Button>
+                    ))}
+                  </Space>
+                </div>
+              )}
+
+              <div style={{ 
+                position: 'relative', 
+                boxShadow: '0 2px 6px rgba(0,0,0,0.05), 0 0 0 1px rgba(0,0,0,0.05)', 
+                borderRadius: 24,
+                background: '#fff',
+                padding: '8px 16px'
+              }}>
+                <TextArea
+                  autoSize={{ minRows: 1, maxRows: 6 }}
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder="给知识库发送消息..."
+                  bordered={false}
+                  style={{ paddingRight: 40, resize: 'none', boxShadow: 'none' }}
+                  onPressEnter={(e) => {
+                    if (!e.shiftKey) {
+                      e.preventDefault();
+                      void ask();
+                    }
+                  }}
+                />
+                <Button 
+                  type="primary" 
+                  shape="circle" 
+                  icon={<SendOutlined />} 
+                  onClick={ask} 
+                  loading={loading} 
+                  disabled={!question.trim() || !canAsk}
+                  style={{ position: 'absolute', right: 8, bottom: 8 }}
+                />
+              </div>
+              <div style={{ textAlign: 'center', marginTop: 8 }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  AI 可能会犯错。请核实重要信息。
+                </Text>
               </div>
             </div>
-          </List.Item>
-        )}
-        style={{ marginBottom: 12, maxHeight: 360, overflow: 'auto' }}
-      />
-
-      <TextArea
-        rows={3}
-        value={question}
-        onChange={(e) => setQuestion(e.target.value)}
-        placeholder="输入问题后发送..."
-      />
-      <Space style={{ marginTop: 12 }}>
-        <Button
-          onClick={() => {
-            const next = searchMode === 'internal' ? 'hybrid' : 'internal';
-            setSearchMode(next);
-            localStorage.setItem('kb-chat-search-mode', next);
-          }}
-        >
-          {searchMode === 'hybrid' ? '已启用外部搜索' : '仅内部知识库'}
-        </Button>
-        <Button type="primary" onClick={ask} loading={loading} disabled={!canAsk}>
-          发送
-        </Button>
-        <Button
-          onClick={() => {
-            setChat([]);
-            setSources([]);
-            setFollowUps([]);
-            setSessionId('');
-            localStorage.removeItem('kb-chat-history');
-            localStorage.removeItem('kb-chat-session-id');
-          }}
-        >
-          清空会话
-        </Button>
-      </Space>
-      <div style={{ marginTop: 8 }}>
-        <Text type="secondary">
-          本轮来源：{usedSearchMode === 'hybrid' ? '内部知识库 + 外部搜索' : '仅内部知识库'}
-        </Text>
-      </div>
-      {loading && (
-        <div style={{ marginTop: 10 }}>
-          <Spin size="small" /> <Text type="secondary">正在思考中...</Text>
-        </div>
+          </div>
+        </>
       )}
-
-      {sources.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <Text strong>参考资料：</Text>
-          <List
-            size="small"
-            dataSource={sources}
-            renderItem={(s: any) => (
-              <List.Item>
-                <Text>{s.title || '未命名资料'} {s.platform ? `(${s.platform})` : ''}</Text>
-              </List.Item>
-            )}
-          />
-        </div>
-      )}
-
-      {followUps.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <Text strong>推荐追问：</Text>
-          <Space wrap style={{ marginTop: 6 }}>
-            {followUps.map((f, i) => (
-              <Button key={`${i}-${f}`} size="small" onClick={() => setQuestion(f)}>
-                {f}
-              </Button>
-            ))}
-          </Space>
-        </div>
-      )}
-    </Card>
+    </div>
   );
 }

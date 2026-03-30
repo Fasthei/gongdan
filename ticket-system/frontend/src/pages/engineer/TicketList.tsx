@@ -95,7 +95,7 @@ export default function EngineerTicketList() {
   ];
 
   return (
-    <>
+    <div style={{ padding: '24px', background: '#fff', borderRadius: 8 }}>
       <Space style={{ marginBottom: 16 }}>
         <Select placeholder="筛选状态" allowClear style={{ width: 140 }} onChange={setStatusFilter}>
           {Object.entries(STATUS_MAP).map(([k, v]) => (
@@ -109,8 +109,7 @@ export default function EngineerTicketList() {
         dataSource={tickets}
         loading={loading}
         pagination={{ current: page, total, pageSize: 20, onChange: setPage }}
-        size="small"
       />
-    </>
+    </div>
   );
 }

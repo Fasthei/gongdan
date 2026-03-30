@@ -65,7 +65,7 @@ export default function CustomerTicketList() {
 
   return (
     <div style={{ maxWidth: 1100, margin: '24px auto', padding: '0 16px' }}>
-      <Card>
+      <Card bordered={false}>
         <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
           <Title level={4} style={{ margin: 0 }}>我的工单</Title>
           <Space>

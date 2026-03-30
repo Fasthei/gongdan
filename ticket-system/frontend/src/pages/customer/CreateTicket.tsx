@@ -55,7 +55,7 @@ export default function CreateTicket() {
         <Title level={4} style={{ margin: 0 }}>提交新工单</Title>
       </Space>
 
-      <Card>
+      <Card bordered={false}>
         <Form form={form} layout="vertical" onFinish={onFinish}>
           <Form.Item name="platform" label="使用平台" rules={[{ required: true, message: '请选择平台' }]}>
             <Select placeholder="请选择平台" size="large">

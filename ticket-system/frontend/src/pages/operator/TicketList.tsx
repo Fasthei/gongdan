@@ -120,16 +120,18 @@ export default function OperatorTicketList() {
   ];
 
   return (
-    <>
-      <Space style={{ marginBottom: 16 }}>
-        <Select placeholder="筛选状态" allowClear style={{ width: 140 }} onChange={setStatusFilter}>
-          {Object.entries(STATUS_MAP).map(([k, v]) => (
-            <Select.Option key={k} value={k}>{v.label}</Select.Option>
-          ))}
-        </Select>
-        <Badge count={tickets.filter(t => t.status === 'PENDING_CLOSE').length} offset={[4, 0]}>
-          <span style={{ color: '#faad14', fontWeight: 500 }}>待审批关闭</span>
-        </Badge>
+    <div style={{ padding: '24px', background: '#fff', borderRadius: 8 }}>
+      <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
+        <Space>
+          <Select placeholder="筛选状态" allowClear style={{ width: 140 }} onChange={setStatusFilter}>
+            {Object.entries(STATUS_MAP).map(([k, v]) => (
+              <Select.Option key={k} value={k}>{v.label}</Select.Option>
+            ))}
+          </Select>
+          <Badge count={tickets.filter(t => t.status === 'PENDING_CLOSE').length} offset={[4, 0]}>
+            <span style={{ color: '#faad14', fontWeight: 500, marginLeft: 8 }}>待审批关闭</span>
+          </Badge>
+        </Space>
       </Space>
 
       <Table
@@ -138,7 +140,6 @@ export default function OperatorTicketList() {
         dataSource={tickets}
         loading={loading}
         pagination={{ current: page, total, pageSize: 20, onChange: setPage }}
-        size="small"
       />
 
       <Modal
@@ -160,6 +161,6 @@ export default function OperatorTicketList() {
           ))}
         </Select>
       </Modal>
-    </>
+    </div>
   );
 }

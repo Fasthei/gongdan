@@ -4,6 +4,9 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { PrismaService } from '../prisma/prisma.service';
 import { randomUUID } from 'crypto';
+import { ChatOpenAI } from '@langchain/openai';
+import { z } from 'zod';
+import { createAgent, tool } from 'langchain';
 
 export interface KBSearchResult {
   id: string;
@@ -31,6 +34,10 @@ export class KnowledgeBaseService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly aiSearchBaseUrl: string;
+  private readonly llmBaseUrl: string;
+  private readonly llmApiKey: string;
+  private readonly llmPrimaryModel: string;
+  private readonly llmFallbackModel: string;
   private sessionTableReady = false;
 
   constructor(
@@ -44,6 +51,10 @@ export class KnowledgeBaseService {
     this.aiSearchBaseUrl =
       this.config.get<string>('AI_SEARCH_AGENT_URL') ||
       'https://aisousuo-gxe7hphbduetgqam.eastasia-01.azurewebsites.net/api';
+    this.llmBaseUrl = this.config.get<string>('LLM_BASE_URL') || 'https://api.taijiaicloud.com/v1';
+    this.llmApiKey = this.config.get<string>('LLM_API_KEY') || '';
+    this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'claude-sonnet-4-6';
+    this.llmFallbackModel = this.config.get<string>('LLM_FALLBACK_MODEL') || 'gemini-3.1-flash-lite-preview';
   }
 
   private get headers() {
@@ -320,6 +331,150 @@ export class KnowledgeBaseService {
     }
   }
 
+  private createAgentModel(modelName: string) {
+    return new ChatOpenAI({
+      model: modelName,
+      apiKey: this.llmApiKey,
+      configuration: {
+        baseURL: this.llmBaseUrl,
+      },
+      temperature: 0.2,
+      timeout: 30000,
+    });
+  }
+
+  private async buildAgentAnswer(params: {
+    question: string;
+    history: Array<{ role: 'user' | 'assistant'; content: string }>;
+    searchMode: 'internal' | 'hybrid';
+  }) {
+    const normalizeMessageContent = (content: any): string => {
+      if (typeof content === 'string') return content;
+      if (Array.isArray(content)) {
+        return content
+          .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+          .filter(Boolean)
+          .join('\n');
+      }
+      return '';
+    };
+
+    const { question, history, searchMode } = params;
+    const sourceBucket: KBSearchResult[] = [];
+    let followUps: string[] = [];
+    let confidence: number | undefined;
+    const dedupeSource = (items: KBSearchResult[]) => {
+      const seen = new Set(sourceBucket.map((s) => `${s.title}::${s.platform || ''}`));
+      for (const item of items) {
+        const key = `${item.title}::${item.platform || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          sourceBucket.push(item);
+        }
+      }
+    };
+
+    const internalTool = tool(
+      async ({ question: q }: { question: string }) => {
+        const res = await this.smartQuery(q, 5, history.slice(-10));
+        dedupeSource(res.sources || []);
+        return JSON.stringify({
+          answer: res.answer || '',
+          sources: (res.sources || []).slice(0, 8),
+        });
+      },
+      {
+        name: 'internal_kb_search',
+        description: '查询内部知识库并返回答案与来源文档',
+        schema: z.object({
+          question: z.string(),
+        }),
+      },
+    );
+
+    const externalTool = tool(
+      async ({ query }: { query: string }) => {
+        if (searchMode !== 'hybrid') {
+          return JSON.stringify({
+            disabled: true,
+            reason: 'external search disabled by searchMode',
+          });
+        }
+        const res = await this.aiSearch(query);
+        dedupeSource(res.sources || []);
+        if (Array.isArray(res.followUps) && res.followUps.length > 0) {
+          followUps = res.followUps;
+        }
+        if (typeof res.confidence === 'number') {
+          confidence = res.confidence;
+        }
+        return JSON.stringify({
+          answer: res.answer || '',
+          sources: (res.sources || []).slice(0, 8),
+          followUps: res.followUps || [],
+          confidence: res.confidence,
+        });
+      },
+      {
+        name: 'external_ai_search',
+        description: '调用外部AI搜索（PydanticAI Agent）获取补充答案与追问',
+        schema: z.object({
+          query: z.string(),
+        }),
+      },
+    );
+
+    const tools = searchMode === 'hybrid' ? [internalTool, externalTool] : [internalTool];
+    const systemPrompt = [
+      '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
+      `当前检索模式: ${searchMode}`,
+      '当模式为 internal 时，禁止使用 external_ai_search。',
+      '输出中文，结构清晰，先给结论，再给关键依据，最后可给下一步建议。',
+      '不要原样复读工具JSON，要整理成可读答案。',
+    ].join('\n');
+
+    const invokeAgentWithModel = async (modelName: string) => {
+      const llm = this.createAgentModel(modelName);
+      const agent = createAgent({
+        model: llm,
+        tools,
+        systemPrompt,
+      });
+      return (agent as any).invoke({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              `历史对话（最近10轮）:\n${history.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
+              `\n用户问题:\n${question}`,
+            ].join('\n'),
+          },
+        ],
+      });
+    };
+
+    let output: string;
+    try {
+      const res = await invokeAgentWithModel(this.llmPrimaryModel);
+      output =
+        normalizeMessageContent((res as any)?.content) ||
+        normalizeMessageContent((res as any)?.messages?.[(res as any).messages.length - 1]?.content);
+    } catch (err: any) {
+      this.logger.warn(`主模型调用失败，准备回退模型: ${err.message}`);
+      const res = await invokeAgentWithModel(this.llmFallbackModel);
+      output =
+        normalizeMessageContent((res as any)?.content) ||
+        normalizeMessageContent((res as any)?.messages?.[(res as any).messages.length - 1]?.content);
+    }
+
+    return {
+      answer: output || '暂未检索到可用答案，请换个问法试试。',
+      sources: sourceBucket.slice(0, 10),
+      followUps,
+      confidence,
+    };
+  }
+
   async chat(params: {
     sessionId?: string;
     userId: string;
@@ -333,20 +488,12 @@ export class KnowledgeBaseService {
     const history = await this.getSessionMessages(sessionId, params.userId);
     await this.addMessage(sessionId, 'user', params.message, usedSearchMode);
 
-    const kb = await this.smartQuery(
-      params.message,
-      5,
-      history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
-    );
-    const ai =
-      usedSearchMode === 'hybrid'
-        ? await this.aiSearch(params.message)
-        : { answer: '', sources: [] as KBSearchResult[], followUps: [] as string[], confidence: undefined };
-
-    const answerParts: string[] = [];
-    if (kb.answer) answerParts.push(`【内部知识库】\n${kb.answer}`);
-    if (ai.answer) answerParts.push(`【AI 搜索】\n${ai.answer}`);
-    const answer = answerParts.join('\n\n') || '暂未检索到可用答案，请换个问法试试。';
+    const agentResult = await this.buildAgentAnswer({
+      question: params.message,
+      history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
+      searchMode: usedSearchMode,
+    });
+    const answer = agentResult.answer;
 
     await this.addMessage(sessionId, 'assistant', answer, usedSearchMode);
     const messages = await this.getSessionMessages(sessionId, params.userId);
@@ -354,9 +501,9 @@ export class KnowledgeBaseService {
     return {
       sessionId,
       answer,
-      sources: [...kb.sources, ...ai.sources].slice(0, 10),
-      followUps: ai.followUps || [],
-      confidence: ai.confidence,
+      sources: agentResult.sources || [],
+      followUps: agentResult.followUps || [],
+      confidence: agentResult.confidence,
       usedSearchMode,
       messages,
     };

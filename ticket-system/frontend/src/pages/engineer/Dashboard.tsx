@@ -39,12 +39,14 @@ export default function EngineerDashboard() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider theme="dark" width={200}>
-        <div style={{ padding: '16px', color: '#fff', fontWeight: 'bold', fontSize: 16 }}>工程师后台</div>
-        <Menu theme="dark" mode="inline" selectedKeys={[location.pathname]} items={menuItems} />
+      <Sider theme="light" width={240} style={{ borderRight: '1px solid #f0f0f0' }}>
+        <div style={{ padding: '24px 16px', fontWeight: 'bold', fontSize: 18, color: '#1a73e8' }}>
+          工程师后台
+        </div>
+        <Menu theme="light" mode="inline" selectedKeys={[location.pathname]} items={menuItems} style={{ borderRight: 'none' }} />
       </Sider>
       <Layout>
-        <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f0f0f0' }}>
           <Text>欢迎，{user?.username}（{user?.level}）</Text>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <span>接单状态：</span>

@@ -17,7 +17,51 @@ const KnowledgeBaseChat = React.lazy(() => import('./pages/common/KnowledgeBaseC
 
 function App() {
   return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: '#1a73e8',
+          borderRadius: 8,
+          fontFamily: 'Roboto, "Helvetica Neue", Arial, sans-serif',
+          colorBgContainer: '#ffffff',
+          colorBgLayout: '#f8f9fa',
+          colorText: '#202124',
+          colorTextSecondary: '#5f6368',
+        },
+        components: {
+          Layout: {
+            headerBg: '#ffffff',
+            headerPadding: '0 24px',
+            siderBg: '#ffffff',
+          },
+          Menu: {
+            itemBg: 'transparent',
+            itemSelectedBg: '#e8f0fe',
+            itemSelectedColor: '#1a73e8',
+            itemHoverBg: '#f1f3f4',
+          },
+          Card: {
+            boxShadowTertiary: '0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15)',
+          },
+          Button: {
+            controlHeight: 36,
+            paddingInline: 16,
+            borderRadius: 18,
+          },
+          Input: {
+            controlHeight: 36,
+            borderRadius: 8,
+          },
+          Table: {
+            headerBg: '#f1f3f4',
+            headerColor: '#5f6368',
+            rowHoverBg: '#f8f9fa',
+            borderRadius: 8,
+          },
+        },
+      }}
+    >
       <AuthProvider>
         <BrowserRouter>
           <React.Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}>加载中...</div>}>
