@@ -190,10 +190,15 @@ export default function StatusBoard() {
             </Card>
 
             {status.external?.data && Object.keys(status.external.data).length > 0 && (
-              <Card size="small" title="外部平台原始数据">
-                <pre style={{ fontSize: 12, margin: 0, overflow: 'auto' }}>
-                  {JSON.stringify(status.external.data, null, 2)}
-                </pre>
+              <Card size="small" title="历史数据">
+                <details>
+                  <summary style={{ cursor: 'pointer', color: '#5f6368', fontSize: 13 }}>
+                    展开查看历史数据（JSON）
+                  </summary>
+                  <pre style={{ fontSize: 12, margin: '10px 0 0', overflow: 'auto', maxHeight: 360 }}>
+                    {JSON.stringify(status.external.data, null, 2)}
+                  </pre>
+                </details>
               </Card>
             )}
           </Space>
