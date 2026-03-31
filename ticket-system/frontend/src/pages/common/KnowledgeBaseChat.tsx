@@ -117,6 +117,54 @@ export default function KnowledgeBaseChat() {
     return true;
   }, [isCustomer, verifiedCode]);
 
+  const markdownComponents = useMemo(
+    () => ({
+      code({ inline, className, children, ...props }: any) {
+        const raw = String(children ?? '');
+        if (inline) {
+          return (
+            <code className={className} {...props}>
+              {children}
+            </code>
+          );
+        }
+        const codeText = raw.replace(/\n$/, '');
+        return (
+          <div style={{ position: 'relative' }}>
+            <Button
+              size="small"
+              type="text"
+              icon={<CopyOutlined />}
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(codeText);
+                  message.success('代码已复制');
+                } catch {
+                  message.error('复制失败');
+                }
+              }}
+              style={{
+                position: 'absolute',
+                right: 8,
+                top: 8,
+                color: '#d1d5db',
+                zIndex: 1,
+              }}
+            >
+              复制代码
+            </Button>
+            <pre>
+              <code className={className} {...props}>
+                {codeText}
+              </code>
+            </pre>
+          </div>
+        );
+      },
+    }),
+    [],
+  );
+
   const docEvidenceSummary = useMemo(() => {
     const lastAssistant = [...chat].reverse().find((m) => m.role === 'assistant')?.content?.trim() || '';
     const lastUser = [...chat].reverse().find((m) => m.role === 'user')?.content?.trim() || '';
@@ -751,7 +799,9 @@ export default function KnowledgeBaseChat() {
                             {item.role === 'user' ? (
                               <div style={{ whiteSpace: 'pre-wrap' }}>{item.content}</div>
                             ) : (
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.content}</ReactMarkdown>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                {item.content}
+                              </ReactMarkdown>
                             )}
                           </div>
                           {item.searchMode && (
@@ -918,7 +968,9 @@ export default function KnowledgeBaseChat() {
                           </summary>
                           <div style={{ maxHeight: loading ? 220 : 360, overflow: 'auto', marginTop: 8 }}>
                             <div className="markdown-body" style={{ fontSize: 13, lineHeight: 1.55, color: '#5f6368' }}>
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{llmThinkText}</ReactMarkdown>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                {llmThinkText}
+                              </ReactMarkdown>
                             </div>
                           </div>
                         </details>
@@ -940,7 +992,9 @@ export default function KnowledgeBaseChat() {
                                       问题：{r.question}
                                     </Text>
                                     <div className="markdown-body" style={{ fontSize: 12, lineHeight: 1.5, color: '#5f6368' }}>
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.think}</ReactMarkdown>
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                        {r.think}
+                                      </ReactMarkdown>
                                     </div>
                                   </div>
                                 </details>
