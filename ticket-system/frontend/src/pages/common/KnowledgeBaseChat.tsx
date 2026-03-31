@@ -368,7 +368,10 @@ export default function KnowledgeBaseChat() {
 
       const res = await fetchWithAuthStream(apiUrl('/api/knowledge-base/chat/stream'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
         body: JSON.stringify({
           sessionId: sessionId || undefined,
           message: mergedMessage,
@@ -493,22 +496,35 @@ export default function KnowledgeBaseChat() {
       };
 
       const parseSseBlock = (block: string) => {
-        const lines = block.split('\n').map((l) => l.replace(/\r$/, ''));
-        const dataLines = lines.filter((l) => l.startsWith('data:'));
+        const lines = block.split(/\r?\n/).map((l) => l.replace(/\r$/, ''));
+        const dataLines = lines.filter((l) => l.trimStart().startsWith('data:'));
         if (!dataLines.length) return;
         const raw = dataLines
-          .map((l) => l.replace(/^data:\s?/i, '').trim())
+          .map((l) => l.trimStart().replace(/^data:\s?/i, '').trim())
           .join('\n')
           .trim();
         handleSsePayload(raw);
+      };
+
+      const pullSseBlocks = (input: string): { blocks: string[]; rest: string } => {
+        const blocks: string[] = [];
+        let rest = input;
+        while (true) {
+          const m = rest.match(/\r?\n\r?\n/);
+          if (!m || m.index === undefined) break;
+          const idx = m.index;
+          blocks.push(rest.slice(0, idx));
+          rest = rest.slice(idx + m[0].length);
+        }
+        return { blocks, rest };
       };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buf += dec.decode(value, { stream: true });
-        const blocks = buf.split('\n\n');
-        buf = blocks.pop() || '';
+        const { blocks, rest } = pullSseBlocks(buf);
+        buf = rest;
         for (const block of blocks) {
           parseSseBlock(block);
         }
