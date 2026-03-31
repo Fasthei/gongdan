@@ -16,7 +16,6 @@ import {
   FileWordOutlined,
   FileExcelOutlined,
   FilePptOutlined,
-  EditOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
@@ -52,6 +51,14 @@ type ThinkRound = {
   searchMode: 'internal' | 'hybrid';
   createdAt: string;
 };
+type DocAttachment = {
+  uid: string;
+  name: string;
+  status: 'uploading' | 'done' | 'error';
+  kind: 'word' | 'txt' | 'table' | 'image';
+  parsedText: string;
+  error?: string;
+};
 
 export default function KnowledgeBaseChat() {
   const { user } = useAuth();
@@ -84,11 +91,11 @@ export default function KnowledgeBaseChat() {
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
   const [requestExampleText, setRequestExampleText] = useState('');
   const [exampleFileList, setExampleFileList] = useState<UploadFile[]>([]);
-  const [docModalOpen, setDocModalOpen] = useState(false);
   const [docFileList, setDocFileList] = useState<UploadFile[]>([]);
+  const [docAttachments, setDocAttachments] = useState<DocAttachment[]>([]);
   const [docContextText, setDocContextText] = useState('');
   const [docContextName, setDocContextName] = useState('');
-  const [writingMode, setWritingMode] = useState(false);
+  const [workspaceVisible, setWorkspaceVisible] = useState(false);
   const [workspaceText, setWorkspaceText] = useState('');
   const [docGenModalOpen, setDocGenModalOpen] = useState(false);
   const [docGenLoading, setDocGenLoading] = useState(false);
@@ -198,6 +205,27 @@ export default function KnowledgeBaseChat() {
     if (!samples.length) return '';
     return samples.join('\n\n# ---- 来自其他工单请求示例 ----\n\n');
   };
+
+  const getDocKind = (name: string): DocAttachment['kind'] | null => {
+    const n = name.toLowerCase();
+    if (n.endsWith('.doc') || n.endsWith('.docx')) return 'word';
+    if (n.endsWith('.txt')) return 'txt';
+    if (n.endsWith('.csv') || n.endsWith('.xls') || n.endsWith('.xlsx')) return 'table';
+    if (n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.webp') || n.endsWith('.gif')) return 'image';
+    return null;
+  };
+
+  const removeDocAttachment = (uid: string) => {
+    setDocAttachments((prev) => prev.filter((f) => f.uid !== uid));
+  };
+
+  useEffect(() => {
+    const ready = docAttachments.filter((f) => f.status === 'done');
+    const ctx = ready.map((f) => f.parsedText).filter(Boolean).join('\n\n');
+    setDocContextText(ctx);
+    setDocContextName(ready.map((f) => f.name).join(', '));
+    setDocFileList(ready.map((f) => ({ uid: f.uid, name: f.name, status: 'done' as const })));
+  }, [docAttachments]);
 
   useEffect(() => {
     if (messagesRef.current) {
@@ -334,7 +362,7 @@ export default function KnowledgeBaseChat() {
           }
         } else if (json.type === 'token' && json.source === 'llm' && typeof json.text === 'string') {
           patchAssistant(acc + json.text);
-          if (writingMode) setWorkspaceText(acc + json.text);
+          if (workspaceVisible) setWorkspaceText(acc + json.text);
         } else if (json.type === 'llm_think' && typeof json.text === 'string' && json.text) {
           const delta = json.text;
           setLlmThinkText((prev) => {
@@ -388,7 +416,7 @@ export default function KnowledgeBaseChat() {
           setAiSearchStreamText('');
           setChat(json.messages as ChatItem[]);
           localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
-          if (writingMode) {
+          if (workspaceVisible) {
             const msgs = json.messages as ChatItem[];
             const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
             if (lastAssistant?.content) setWorkspaceText(lastAssistant.content);
@@ -457,6 +485,15 @@ export default function KnowledgeBaseChat() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openDocGeneration = () => {
+    setWorkspaceVisible(true);
+    if (!workspaceText.trim()) {
+      const lastAssistant = [...chat].reverse().find((m) => m.role === 'assistant');
+      if (lastAssistant?.content) setWorkspaceText(lastAssistant.content);
+    }
+    setDocGenModalOpen(true);
   };
 
   return (
@@ -578,7 +615,7 @@ export default function KnowledgeBaseChat() {
                 flex: 1,
                 display: 'flex',
                 flexDirection: 'row',
-              gap: writingMode ? 16 : 24,
+              gap: workspaceVisible ? 16 : 24,
                 padding: '0 24px',
                 minHeight: 0,
                 maxWidth: 1200,
@@ -591,7 +628,7 @@ export default function KnowledgeBaseChat() {
               <div
                 ref={messagesRef}
                 style={{
-                  flex: writingMode ? '0 0 58%' : 1,
+                  flex: workspaceVisible ? '0 0 58%' : 1,
                   minWidth: 0,
                   maxWidth: 800,
                   overflowY: 'auto',
@@ -661,7 +698,7 @@ export default function KnowledgeBaseChat() {
                   )}
               </div>
 
-              {writingMode ? (
+              {workspaceVisible ? (
                 <div
                   style={{
                     flex: '0 0 42%',
@@ -674,16 +711,16 @@ export default function KnowledgeBaseChat() {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text strong>写作工作区</Text>
+                    <Text strong>文档工作区</Text>
                     <Space size={6}>
-                      <Button size="small" icon={<DownloadOutlined />} onClick={() => setDocGenModalOpen(true)}>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={openDocGeneration}>
                         文档生成
                       </Button>
                       <Button size="small" onClick={() => setWorkspaceText('')}>清空</Button>
                     </Space>
                   </div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    在写作模式中，模型输出会同步到这里，你可以继续编辑后生成 Word/PPT/Excel。
+                    文档生成模式下，模型输出会同步到这里，你可以继续编辑后生成 Word/PPT/Excel。
                   </Text>
                   <TextArea
                     value={workspaceText}
@@ -967,6 +1004,57 @@ export default function KnowledgeBaseChat() {
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'absolute', bottom: 8, left: 16, right: 8, flexWrap: 'wrap', gap: 8 }}>
                   <Space size={8} wrap>
+                  <Upload
+                    accept=".doc,.docx,.txt,.csv,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.gif"
+                    showUploadList={false}
+                    multiple
+                    beforeUpload={(file) => {
+                      const kind = getDocKind(file.name);
+                      if (!kind) {
+                        message.warning('仅支持 Word/TXT/表格/图片 四类文件');
+                        return Upload.LIST_IGNORE;
+                      }
+                      if (docAttachments.length >= 3) {
+                        message.warning('最多上传 3 个文档');
+                        return Upload.LIST_IGNORE;
+                      }
+                      const uid = file.uid;
+                      setDocAttachments((prev) => [
+                        ...prev,
+                        { uid, name: file.name, status: 'uploading', kind, parsedText: '' },
+                      ]);
+                      const done = (parsedText: string) => {
+                        setDocAttachments((prev) =>
+                          prev.map((f) => (f.uid === uid ? { ...f, status: 'done', parsedText } : f)),
+                        );
+                      };
+                      const fail = (errMsg: string) => {
+                        setDocAttachments((prev) =>
+                          prev.map((f) => (f.uid === uid ? { ...f, status: 'error', error: errMsg } : f)),
+                        );
+                      };
+                      if (kind === 'txt' || (kind === 'table' && file.name.toLowerCase().endsWith('.csv'))) {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          const text = String(reader.result || '');
+                          const clipped = text.length > 120000 ? `${text.slice(0, 120000)}\n... [文件内容已截断]` : text;
+                          done(`--- 文件: ${file.name} ---\n${clipped}`);
+                        };
+                        reader.onerror = () => fail('读取失败');
+                        reader.readAsText(file as Blob);
+                      } else {
+                        const kb = Math.max(1, Math.round(file.size / 1024));
+                        const note =
+                          kind === 'image'
+                            ? `--- 图片文件: ${file.name} ---\n[图片已上传，当前仅附带文件元信息，大小 ${kb}KB]`
+                            : `--- 文件: ${file.name} ---\n[二进制文档已上传，当前仅附带文件元信息，大小 ${kb}KB]`;
+                        done(note);
+                      }
+                      return false;
+                    }}
+                  >
+                    <Button shape="circle" size="small" icon={<PlusOutlined />} title="上传文档（最多3个）" />
+                  </Upload>
                   <Button
                     shape="round"
                     size="small"
@@ -1044,29 +1132,8 @@ export default function KnowledgeBaseChat() {
                   <Button
                     shape="round"
                     size="small"
-                    onClick={() => setDocModalOpen(true)}
-                  >
-                    文档
-                  </Button>
-                  <Button
-                    shape="round"
-                    size="small"
-                    icon={<EditOutlined />}
-                    onClick={() => setWritingMode((v) => !v)}
-                    style={{
-                      border: 'none',
-                      boxShadow: 'none',
-                      background: writingMode ? '#262626' : '#f1f3f4',
-                      color: writingMode ? '#fff' : '#5f6368',
-                    }}
-                  >
-                    写作模式
-                  </Button>
-                  <Button
-                    shape="round"
-                    size="small"
                     icon={<DownloadOutlined />}
-                    onClick={() => setDocGenModalOpen(true)}
+                    onClick={openDocGeneration}
                   >
                     文档生成
                   </Button>
@@ -1088,6 +1155,28 @@ export default function KnowledgeBaseChat() {
                     disabled={!question.trim() || !canAsk}
                   />
                 </div>
+                {docAttachments.length > 0 ? (
+                  <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {docAttachments.map((f) => (
+                      <Tag
+                        key={f.uid}
+                        closable
+                        onClose={(e) => {
+                          e.preventDefault();
+                          removeDocAttachment(f.uid);
+                        }}
+                        color={f.status === 'done' ? 'blue' : f.status === 'uploading' ? 'processing' : 'error'}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                      >
+                        {f.status === 'uploading' ? <Spin size="small" /> : null}
+                        {f.name}
+                        <span style={{ opacity: 0.7 }}>
+                          {f.status === 'uploading' ? '加载中' : f.status === 'done' ? '已就绪' : '失败'}
+                        </span>
+                      </Tag>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <div style={{ textAlign: 'center', marginTop: 8 }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1165,7 +1254,7 @@ export default function KnowledgeBaseChat() {
             onChange={(e) => setDocGenTitle(e.target.value)}
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            生成内容来源：优先取写作工作区内容；若工作区为空，则取最近一条助手回答。
+            生成内容来源：优先取文档工作区内容；若工作区为空，则取最近一条助手回答。
           </Text>
           {docGenResult ? (
             <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 12 }}>
@@ -1179,60 +1268,6 @@ export default function KnowledgeBaseChat() {
               </div>
             </div>
           ) : null}
-        </Space>
-      </Modal>
-
-      <Modal
-        title="临时文档上下文（仅本轮，不入历史）"
-        open={docModalOpen}
-        onCancel={() => setDocModalOpen(false)}
-        footer={[
-          <Button key="clear" onClick={() => { setDocContextText(''); setDocContextName(''); setDocFileList([]); }}>
-            清空
-          </Button>,
-          <Button key="close" type="primary" onClick={() => setDocModalOpen(false)}>
-            保存并关闭
-          </Button>,
-        ]}
-        width={760}
-        destroyOnClose={false}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <Upload
-            accept=".txt,.md,.markdown,.json,.log,.csv,.http,.yaml,.yml,.xml,.js,.ts,.py,.java,.go,.rs,.sql"
-            multiple
-            maxCount={5}
-            fileList={docFileList}
-            beforeUpload={(file) => {
-              const reader = new FileReader();
-              reader.onload = () => {
-                const text = String(reader.result || '');
-                const clipped = text.length > 120000 ? `${text.slice(0, 120000)}\n... [文件内容已截断]` : text;
-                const block = [`--- 文件: ${file.name} ---`, clipped].join('\n');
-                setDocContextText((prev) => (prev.trim() ? `${prev}\n\n${block}` : block));
-                setDocContextName((prev) => (prev.trim() ? `${prev}, ${file.name}` : file.name));
-                setDocFileList((prev) => [...prev, { uid: file.uid, name: file.name, status: 'done' }]);
-                message.success(`已读取 ${file.name}`);
-              };
-              reader.readAsText(file as Blob);
-              return false;
-            }}
-            onRemove={(file) => {
-              setDocFileList((prev) => prev.filter((f) => f.uid !== file.uid));
-              return true;
-            }}
-          >
-            <Button icon={<UploadOutlined />}>上传文档（仅本轮使用）</Button>
-          </Upload>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            这些文档只会作为本轮对话补充上下文发送给模型，不会写入会话历史消息。
-          </Text>
-          <TextArea
-            rows={12}
-            value={docContextText}
-            onChange={(e) => setDocContextText(e.target.value)}
-            placeholder="可粘贴补充文档内容（如日志、配置、接口文档片段）…"
-          />
         </Space>
       </Modal>
 
