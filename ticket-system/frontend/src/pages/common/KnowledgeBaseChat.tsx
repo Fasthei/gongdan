@@ -117,6 +117,25 @@ export default function KnowledgeBaseChat() {
     return true;
   }, [isCustomer, verifiedCode]);
 
+  const docEvidenceSummary = useMemo(() => {
+    const lastAssistant = [...chat].reverse().find((m) => m.role === 'assistant')?.content?.trim() || '';
+    const lastUser = [...chat].reverse().find((m) => m.role === 'user')?.content?.trim() || '';
+    const topSources = (sources || []).slice(0, 5);
+    const conclusion = (lastAssistant || lastUser || '暂无结论').slice(0, 220);
+    const keyPoints = [
+      sandboxStatus ? `沙盒状态：${sandboxStatus}` : '',
+      retrievalStatus ? `检索状态：${retrievalStatus}` : '',
+      docContextName.trim() ? `附件：${docContextName.trim()}` : '',
+      requestExampleText.trim() ? '已提供请求示例（用于复现）' : '',
+    ].filter(Boolean);
+    const refs = topSources.map((s: any, i: number) => {
+      const t = s?.title || '未命名资料';
+      const u = typeof s?.url === 'string' ? s.url.trim() : '';
+      return u ? `${i + 1}. ${t} (${u})` : `${i + 1}. ${t}`;
+    });
+    return { conclusion, keyPoints, refs };
+  }, [chat, sources, sandboxStatus, retrievalStatus, docContextName, requestExampleText]);
+
   const verifyCode = () => {
     if (!customerCode.trim()) return message.warning('请先输入客户编号');
     setVerifiedCode(customerCode.trim());
@@ -546,6 +565,18 @@ export default function KnowledgeBaseChat() {
     }
   };
 
+  const applyDocTemplate = (kind: 'polish' | 'expand' | 'table') => {
+    const header =
+      kind === 'polish'
+        ? '【文档迭代指令】请在不改变事实的前提下润色语言，提升专业性与可读性。'
+        : kind === 'expand'
+          ? '【文档迭代指令】请基于现有内容扩写细节，补充步骤、风险和建议。'
+          : '【文档迭代指令】请将现有内容重组为结构化表格，字段清晰、可直接导出。';
+    const next = `${header}\n\n${workspaceText.trim() || '（当前正文为空，请基于证据摘要起草）'}`;
+    setWorkspaceText(next);
+    message.success('已应用文档迭代模板');
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', background: '#fff', margin: '0' }}>
       {/* Header */}
@@ -769,9 +800,36 @@ export default function KnowledgeBaseChat() {
                       <Button size="small" onClick={() => setWorkspaceText('')}>清空</Button>
                     </Space>
                   </div>
+                  <Space size={6} wrap>
+                    <Button size="small" onClick={() => applyDocTemplate('polish')}>润色</Button>
+                    <Button size="small" onClick={() => applyDocTemplate('expand')}>扩写</Button>
+                    <Button size="small" onClick={() => applyDocTemplate('table')}>改成表格</Button>
+                  </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     文档类型由 Agent 根据你的输入自动判断；如果不明确默认生成 Word。
                   </Text>
+                  <div style={{ background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: 8, padding: 10 }}>
+                    <Text strong style={{ fontSize: 12 }}>结构化证据摘要</Text>
+                    <div style={{ marginTop: 6 }}>
+                      <Text style={{ fontSize: 12 }}><strong>结论：</strong>{docEvidenceSummary.conclusion}</Text>
+                    </div>
+                    {docEvidenceSummary.keyPoints.length > 0 ? (
+                      <div style={{ marginTop: 6 }}>
+                        <Text style={{ fontSize: 12, display: 'block', marginBottom: 2 }}><strong>要点：</strong></Text>
+                        {docEvidenceSummary.keyPoints.map((k, i) => (
+                          <Text key={i} style={{ fontSize: 12, display: 'block' }}>- {k}</Text>
+                        ))}
+                      </div>
+                    ) : null}
+                    {docEvidenceSummary.refs.length > 0 ? (
+                      <div style={{ marginTop: 6 }}>
+                        <Text style={{ fontSize: 12, display: 'block', marginBottom: 2 }}><strong>来源：</strong></Text>
+                        {docEvidenceSummary.refs.map((r, i) => (
+                          <Text key={i} style={{ fontSize: 12, display: 'block' }}>{r}</Text>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <TextArea
                     value={workspaceText}
                     onChange={(e) => setWorkspaceText(e.target.value)}

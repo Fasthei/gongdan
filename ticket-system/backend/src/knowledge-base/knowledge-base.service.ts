@@ -34,6 +34,12 @@ export interface KBChatMessage {
 
 type AiSearchDepth = 'quick' | 'deep';
 type DocOutputType = 'ppt' | 'word' | 'table';
+type DocIntent = {
+  outputType: DocOutputType;
+  title?: string;
+  format?: 'xlsx' | 'csv';
+  numSlides?: number;
+};
 
 @Injectable()
 export class KnowledgeBaseService {
@@ -69,6 +75,89 @@ export class KnowledgeBaseService {
       'api-key': this.apiKey,
       'Content-Type': 'application/json',
     };
+  }
+
+  private parseFirstJsonObject(raw: string): any | null {
+    if (!raw || typeof raw !== 'string') return null;
+    const s = raw.trim();
+    const codeFence = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const target = (codeFence?.[1] || s).trim();
+    const firstBrace = target.indexOf('{');
+    const lastBrace = target.lastIndexOf('}');
+    if (firstBrace < 0 || lastBrace <= firstBrace) return null;
+    try {
+      return JSON.parse(target.slice(firstBrace, lastBrace + 1));
+    } catch {
+      return null;
+    }
+  }
+
+  private inferDocIntentHeuristic(prompt: string): DocIntent {
+    const p = prompt.toLowerCase();
+    if (/(ppt|幻灯|演示|发布会|汇报|slides?)/i.test(p)) {
+      return { outputType: 'ppt', numSlides: 8 };
+    }
+    if (/(excel|xlsx|csv|表格|台账|清单|明细表|数据表)/i.test(p)) {
+      return { outputType: 'table', format: /csv/i.test(p) ? 'csv' : 'xlsx' };
+    }
+    return { outputType: 'word' };
+  }
+
+  /**
+   * 子代理-1：意图识别（类型/标题/表格格式/页数）
+   * 若 LLM 不可用则回退关键词规则；默认 word。
+   */
+  private async inferDocIntentSubagent(prompt: string): Promise<DocIntent> {
+    const fallback = this.inferDocIntentHeuristic(prompt);
+    if (!this.llmApiKey?.trim()) return fallback;
+    try {
+      const llm = this.createAgentModel(this.llmFallbackModel);
+      const resp: any = await llm.invoke([
+        {
+          role: 'system',
+          content:
+            '你是 doc-intent 子代理。根据用户内容判断文档类型，仅输出 JSON：{"outputType":"word|ppt|table","title":"可选","format":"xlsx|csv(仅table)","numSlides":数字(仅ppt)}。若不明确默认 word。',
+        },
+        { role: 'user', content: prompt.slice(0, 12000) },
+      ]);
+      const text =
+        typeof resp?.content === 'string'
+          ? resp.content
+          : Array.isArray(resp?.content)
+            ? resp.content.map((x: any) => (typeof x?.text === 'string' ? x.text : '')).join('')
+            : '';
+      const j = this.parseFirstJsonObject(text);
+      const t = String(j?.outputType || '').toLowerCase();
+      const outputType: DocOutputType = t === 'ppt' || t === 'table' || t === 'word' ? (t as DocOutputType) : fallback.outputType;
+      const title = typeof j?.title === 'string' && j.title.trim() ? j.title.trim().slice(0, 120) : undefined;
+      const format: 'xlsx' | 'csv' | undefined =
+        outputType === 'table' ? (String(j?.format || '').toLowerCase() === 'csv' ? 'csv' : 'xlsx') : undefined;
+      const numSlides =
+        outputType === 'ppt' && Number.isFinite(Number(j?.numSlides))
+          ? Math.max(1, Math.min(50, Number(j.numSlides)))
+          : fallback.numSlides;
+      return { outputType, title, format, numSlides };
+    } catch {
+      return fallback;
+    }
+  }
+
+  /**
+   * 子代理-2：内容整理（让导出代理拿到更结构化的提示）
+   */
+  private async composeDocDraftSubagent(prompt: string, intent: DocIntent): Promise<string> {
+    const target = intent.outputType === 'ppt' ? 'PPT' : intent.outputType === 'table' ? '表格' : 'Word 文档';
+    return [
+      `你将生成：${target}`,
+      intent.title ? `建议标题：${intent.title}` : '',
+      intent.outputType === 'table' && intent.format ? `表格格式：${intent.format}` : '',
+      intent.outputType === 'ppt' && intent.numSlides ? `页数建议：${intent.numSlides}` : '',
+      '',
+      '请基于以下用户内容生成最终文档内容（保持专业、结构化、可直接导出）：',
+      prompt,
+    ]
+      .filter(Boolean)
+      .join('\n');
   }
 
   /** 内部 KB 常见：id 为 base64(http/https...) */
@@ -272,14 +361,22 @@ export class KnowledgeBaseService {
     };
     let data: any;
 
-    // 未显式指定 outputType 时，优先让 Doc Creator Agent 通过 /chat 自主判断文档类型。
+    // 协调器：未显式指定类型时，走子代理链路（意图识别 -> 草稿整理 -> 导出执行）。
     if (!explicitType) {
-      const chatRes = await axios.post(
-        `${base}/chat`,
-        { message: params.prompt },
-        { headers, timeout: 120000 },
-      );
-      data = chatRes?.data?.generated || chatRes?.data || {};
+      const intent = await this.inferDocIntentSubagent(params.prompt);
+      const docPrompt = await this.composeDocDraftSubagent(params.prompt, intent);
+      const body: Record<string, any> = {
+        prompt: docPrompt,
+        output_type: intent.outputType || 'word',
+      };
+      if (intent.title || params.title) body.title = (params.title || intent.title)?.trim();
+      if (intent.outputType === 'table') body.format = intent.format || params.format || 'xlsx';
+      if (intent.outputType === 'ppt' && Number.isFinite(intent.numSlides)) body.num_slides = intent.numSlides;
+      const genRes = await axios.post(`${base}/api/v1/generate`, body, {
+        headers,
+        timeout: 120000,
+      });
+      data = genRes.data;
     } else {
       const body: Record<string, any> = {
         prompt: params.prompt,
