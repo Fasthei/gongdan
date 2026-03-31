@@ -14,6 +14,7 @@ const CustomerCreateTicket = React.lazy(() => import('./pages/customer/CreateTic
 const OperatorDashboard = React.lazy(() => import('./pages/operator/Dashboard'));
 const EngineerDashboard = React.lazy(() => import('./pages/engineer/Dashboard'));
 const KnowledgeBaseChat = React.lazy(() => import('./pages/common/KnowledgeBaseChat'));
+const StatusBoard = React.lazy(() => import('./pages/operator/StatusBoard'));
 
 function App() {
   return (
@@ -69,6 +70,7 @@ function App() {
               {/* 公开路由 */}
               <Route path="/login" element={<CustomerLogin />} />
               <Route path="/staff/login" element={<StaffLogin />} />
+              <Route path="/status-board" element={<StatusBoard />} />
               <Route path="/" element={<Navigate to="/login" replace />} />
 
               {/* 客户路由 */}

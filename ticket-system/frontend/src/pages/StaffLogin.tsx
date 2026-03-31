@@ -72,6 +72,8 @@ export default function StaffLogin() {
         </Form>
         <div style={{ textAlign: 'center' }}>
           <Link to="/login">客户登录</Link>
+          <span style={{ margin: '0 8px', color: '#d9d9d9' }}>|</span>
+          <Link to="/status-board">查看服务看板（免登录）</Link>
         </div>
       </Card>
     </div>
