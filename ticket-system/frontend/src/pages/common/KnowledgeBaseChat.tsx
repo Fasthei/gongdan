@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload, Segmented, Select, Tooltip } from 'antd';
+import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload, Select, Tooltip } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import {
   RobotOutlined,
@@ -13,9 +13,6 @@ import {
   CopyOutlined,
   UploadOutlined,
   InfoCircleOutlined,
-  FileWordOutlined,
-  FileExcelOutlined,
-  FilePptOutlined,
   DownloadOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
@@ -95,13 +92,10 @@ export default function KnowledgeBaseChat() {
   const [docAttachments, setDocAttachments] = useState<DocAttachment[]>([]);
   const [docContextText, setDocContextText] = useState('');
   const [docContextName, setDocContextName] = useState('');
-  const [workspaceVisible, setWorkspaceVisible] = useState(false);
+  const [docGenMode, setDocGenMode] = useState(() => localStorage.getItem('kb-doc-gen-mode') === '1');
+  const [workspaceVisible, setWorkspaceVisible] = useState(() => localStorage.getItem('kb-doc-gen-mode') === '1');
   const [workspaceText, setWorkspaceText] = useState('');
-  const [docGenModalOpen, setDocGenModalOpen] = useState(false);
   const [docGenLoading, setDocGenLoading] = useState(false);
-  const [docGenType, setDocGenType] = useState<'ppt' | 'word' | 'table'>('word');
-  const [docGenFormat, setDocGenFormat] = useState<'xlsx' | 'csv'>('xlsx');
-  const [docGenTitle, setDocGenTitle] = useState('');
   const [docGenResult, setDocGenResult] = useState<{ filename: string; url: string; outputType: string } | null>(null);
   const [sandboxStatus, setSandboxStatus] = useState('');
   const [retrievalStatus, setRetrievalStatus] = useState('');
@@ -487,13 +481,69 @@ export default function KnowledgeBaseChat() {
     }
   };
 
-  const openDocGeneration = () => {
-    setWorkspaceVisible(true);
-    if (!workspaceText.trim()) {
-      const lastAssistant = [...chat].reverse().find((m) => m.role === 'assistant');
-      if (lastAssistant?.content) setWorkspaceText(lastAssistant.content);
+  const ensureWorkspaceDraft = () => {
+    if (workspaceText.trim()) return;
+    const lastUser = [...chat].reverse().find((m) => m.role === 'user')?.content || '';
+    const lastAssistant = [...chat].reverse().find((m) => m.role === 'assistant')?.content || '';
+    const pickedSources = (sources || []).slice(0, 6);
+    const pickedMsgs = chat.slice(-8);
+    const draft = [
+      '【文档草稿】',
+      '请基于当前对话与上下文生成一份可继续编辑的内容（若文档类型不明确默认 Word）。',
+      lastUser ? `\n【用户最新诉求】\n${lastUser}` : '',
+      requestExampleText.trim() ? `\n【沙盒请求示例】\n${requestExampleText.trim().slice(0, 4000)}` : '',
+      pickedSources.length
+        ? `\n【知识库命中】\n${pickedSources
+            .map((s: any, i: number) => `- ${i + 1}. ${s?.title || '未命名资料'}${s?.url ? ` (${s.url})` : ''}`)
+            .join('\n')}`
+        : '',
+      docContextText.trim() ? `\n【附件摘要】\n${docContextText.trim().slice(0, 4000)}` : '',
+      pickedMsgs.length
+        ? `\n【最近对话上下文】\n${pickedMsgs.map((m) => `- ${m.role === 'user' ? '用户' : '助手'}: ${m.content}`).join('\n')}`
+        : '',
+      lastAssistant ? `\n【最近助手回答】\n${lastAssistant}` : '',
+      '\n【当前文档正文（可直接编辑）】\n',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    setWorkspaceText(draft);
+  };
+
+  const toggleDocGenMode = () => {
+    const next = !docGenMode;
+    setDocGenMode(next);
+    setWorkspaceVisible(next);
+    localStorage.setItem('kb-doc-gen-mode', next ? '1' : '0');
+    if (next) {
+      ensureWorkspaceDraft();
     }
-    setDocGenModalOpen(true);
+  };
+
+  const runDocGeneration = async () => {
+    const seed =
+      workspaceText.trim() ||
+      chat.filter((m) => m.role === 'assistant').slice(-1)[0]?.content?.trim() ||
+      question.trim();
+    if (!seed) {
+      message.warning('请先输入需求或先让助手产出内容');
+      return;
+    }
+    setDocGenLoading(true);
+    setDocGenResult(null);
+    try {
+      const prompt = seed.length > 12000 ? `${seed.slice(0, 12000)}\n... [内容已截断]` : seed;
+      const { data } = await api.post('/knowledge-base/doc-generate', { prompt });
+      setDocGenResult({
+        filename: data?.filename || '未命名文件',
+        url: data?.url || '',
+        outputType: data?.outputType || 'word',
+      });
+      message.success(`文档生成成功（${(data?.outputType || 'word').toUpperCase()}）`);
+    } catch (e: any) {
+      message.error(e?.response?.data?.message || e?.message || '文档生成失败');
+    } finally {
+      setDocGenLoading(false);
+    }
   };
 
   return (
@@ -713,14 +763,14 @@ export default function KnowledgeBaseChat() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Text strong>文档工作区</Text>
                     <Space size={6}>
-                      <Button size="small" icon={<DownloadOutlined />} onClick={openDocGeneration}>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={runDocGeneration} loading={docGenLoading}>
                         文档生成
                       </Button>
                       <Button size="small" onClick={() => setWorkspaceText('')}>清空</Button>
                     </Space>
                   </div>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    文档生成模式下，模型输出会同步到这里，你可以继续编辑后生成 Word/PPT/Excel。
+                    文档类型由 Agent 根据你的输入自动判断；如果不明确默认生成 Word。
                   </Text>
                   <TextArea
                     value={workspaceText}
@@ -728,6 +778,18 @@ export default function KnowledgeBaseChat() {
                     placeholder="在此编辑你的文稿..."
                     style={{ flex: 1, minHeight: 360 }}
                   />
+                  {docGenResult ? (
+                    <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 12 }}>
+                      <Text strong>已生成：{docGenResult.filename}</Text>
+                      <div style={{ marginTop: 8 }}>
+                        {docGenResult.url ? (
+                          <a href={docGenResult.url} target="_blank" rel="noreferrer">下载文档</a>
+                        ) : (
+                          <Text type="warning">未返回可下载链接</Text>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1133,7 +1195,13 @@ export default function KnowledgeBaseChat() {
                     shape="round"
                     size="small"
                     icon={<DownloadOutlined />}
-                    onClick={openDocGeneration}
+                    onClick={toggleDocGenMode}
+                    style={{
+                      border: 'none',
+                      boxShadow: 'none',
+                      background: docGenMode ? '#202124' : '#f1f3f4',
+                      color: docGenMode ? '#fff' : '#5f6368',
+                    }}
                   >
                     文档生成
                   </Button>
@@ -1188,88 +1256,6 @@ export default function KnowledgeBaseChat() {
           </div>
         </div>
       )}
-
-      <Modal
-        title="文档生成"
-        open={docGenModalOpen}
-        onCancel={() => setDocGenModalOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setDocGenModalOpen(false)}>关闭</Button>,
-          <Button
-            key="gen"
-            type="primary"
-            loading={docGenLoading}
-            onClick={async () => {
-              const seed = workspaceText.trim() || chat.filter((m) => m.role === 'assistant').slice(-1)[0]?.content?.trim() || '';
-              if (!seed) {
-                message.warning('请先在工作区写内容或先让助手输出内容');
-                return;
-              }
-              setDocGenLoading(true);
-              setDocGenResult(null);
-              try {
-                const prompt = seed.length > 12000 ? `${seed.slice(0, 12000)}\n... [内容已截断]` : seed;
-                const { data } = await api.post('/knowledge-base/doc-generate', {
-                  prompt,
-                  outputType: docGenType,
-                  title: docGenTitle.trim() || undefined,
-                  ...(docGenType === 'table' ? { format: docGenFormat } : {}),
-                });
-                setDocGenResult({
-                  filename: data?.filename || '未命名文件',
-                  url: data?.url || '',
-                  outputType: data?.outputType || docGenType,
-                });
-                message.success('文档生成成功');
-              } catch (e: any) {
-                message.error(e?.response?.data?.message || e?.message || '文档生成失败');
-              } finally {
-                setDocGenLoading(false);
-              }
-            }}
-          >
-            生成文档
-          </Button>,
-        ]}
-        width={720}
-      >
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Space wrap>
-            <Button type={docGenType === 'word' ? 'primary' : 'default'} icon={<FileWordOutlined />} onClick={() => setDocGenType('word')}>Word</Button>
-            <Button type={docGenType === 'ppt' ? 'primary' : 'default'} icon={<FilePptOutlined />} onClick={() => setDocGenType('ppt')}>PPT</Button>
-            <Button type={docGenType === 'table' ? 'primary' : 'default'} icon={<FileExcelOutlined />} onClick={() => setDocGenType('table')}>Excel/CSV</Button>
-            {docGenType === 'table' ? (
-              <Select
-                size="small"
-                value={docGenFormat}
-                options={[{ label: 'xlsx', value: 'xlsx' }, { label: 'csv', value: 'csv' }]}
-                onChange={(v) => setDocGenFormat(v)}
-                style={{ width: 100 }}
-              />
-            ) : null}
-          </Space>
-          <Input
-            placeholder="文档标题（可选）"
-            value={docGenTitle}
-            onChange={(e) => setDocGenTitle(e.target.value)}
-          />
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            生成内容来源：优先取文档工作区内容；若工作区为空，则取最近一条助手回答。
-          </Text>
-          {docGenResult ? (
-            <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 12 }}>
-              <Text strong>已生成：{docGenResult.filename}</Text>
-              <div style={{ marginTop: 8 }}>
-                {docGenResult.url ? (
-                  <a href={docGenResult.url} target="_blank" rel="noreferrer">下载文档</a>
-                ) : (
-                  <Text type="warning">未返回可下载链接</Text>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </Space>
-      </Modal>
 
       <Modal
         title="客户请求示例（Daytona 沙盒）"

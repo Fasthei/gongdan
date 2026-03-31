@@ -250,7 +250,7 @@ export class KnowledgeBaseService {
 
   async generateDocument(params: {
     prompt: string;
-    outputType: DocOutputType;
+    outputType?: DocOutputType;
     title?: string;
     format?: 'xlsx' | 'csv';
     numSlides?: number;
@@ -263,24 +263,43 @@ export class KnowledgeBaseService {
       throw new Error('未配置 DOC_CREATOR_API_KEY，无法生成文档');
     }
 
-    const body: Record<string, any> = {
-      prompt: params.prompt,
-      output_type: params.outputType,
+    const explicitType = params.outputType;
+    const normalizedType: DocOutputType = explicitType === 'ppt' || explicitType === 'table' ? explicitType : 'word';
+    const headers = {
+      'Content-Type': 'application/json',
+      'api-key': key,
+      Authorization: `Bearer ${key}`,
     };
-    if (params.title) body.title = params.title;
-    if (params.outputType === 'table' && params.format) body.format = params.format;
-    if (params.outputType === 'ppt' && Number.isFinite(params.numSlides)) {
-      body.num_slides = Math.max(1, Math.min(50, Number(params.numSlides)));
+    let data: any;
+
+    // 未显式指定 outputType 时，优先让 Doc Creator Agent 通过 /chat 自主判断文档类型。
+    if (!explicitType) {
+      const chatRes = await axios.post(
+        `${base}/chat`,
+        { message: params.prompt },
+        { headers, timeout: 120000 },
+      );
+      data = chatRes?.data?.generated || chatRes?.data || {};
+    } else {
+      const body: Record<string, any> = {
+        prompt: params.prompt,
+        output_type: normalizedType,
+      };
+      if (params.title) body.title = params.title;
+      if (normalizedType === 'table' && params.format) body.format = params.format;
+      if (normalizedType === 'ppt' && Number.isFinite(params.numSlides)) {
+        body.num_slides = Math.max(1, Math.min(50, Number(params.numSlides)));
+      }
+      const genRes = await axios.post(`${base}/api/v1/generate`, body, {
+        headers,
+        timeout: 120000,
+      });
+      data = genRes.data;
     }
 
-    const { data } = await axios.post(`${base}/api/v1/generate`, body, {
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': key,
-        Authorization: `Bearer ${key}`,
-      },
-      timeout: 120000,
-    });
+    const rawType = String(data?.output_type || '').toLowerCase();
+    const finalType: DocOutputType =
+      rawType === 'ppt' || rawType === 'table' || rawType === 'word' ? (rawType as DocOutputType) : normalizedType;
 
     const rawUrl = typeof data?.url === 'string' ? data.url.trim() : '';
     const absoluteUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : rawUrl ? `${base}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}` : '';
@@ -288,9 +307,9 @@ export class KnowledgeBaseService {
     return {
       success: !!data?.success,
       filename: data?.filename || '',
-      outputType: data?.output_type || params.outputType,
+      outputType: finalType,
       url: absoluteUrl,
-      format: data?.format || body.format || undefined,
+      format: data?.format || (finalType === 'table' ? params.format || 'xlsx' : undefined),
     };
   }
 

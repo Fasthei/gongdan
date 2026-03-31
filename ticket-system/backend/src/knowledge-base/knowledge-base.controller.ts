@@ -96,7 +96,7 @@ export class KnowledgeBaseController {
     @Body()
     body: {
       prompt: string;
-      outputType: 'ppt' | 'word' | 'table';
+      outputType?: 'ppt' | 'word' | 'table';
       title?: string;
       format?: 'xlsx' | 'csv';
       numSlides?: number;
