@@ -111,6 +111,7 @@ export default function KnowledgeBaseChat() {
   const [selectedTickets, setSelectedTickets] = useState<any[]>([]);
   const [ticketLoading, setTicketLoading] = useState(false);
   const llmThinkRef = useRef('');
+  const aiSearchThinkEventsRef = useRef<Set<string>>(new Set());
 
   const canAsk = useMemo(() => {
     if (isCustomer) return !!verifiedCode;
@@ -338,6 +339,7 @@ export default function KnowledgeBaseChat() {
     setAiSearchStreamText('');
     setLlmThinkText('');
     llmThinkRef.current = '';
+    aiSearchThinkEventsRef.current.clear();
     setSandboxStatus('');
     setRetrievalStatus('');
     let acc = '';
@@ -353,6 +355,17 @@ export default function KnowledgeBaseChat() {
           c[last] = { ...c[last], content: text, searchMode: roundMode };
         }
         return c;
+      });
+    };
+
+    const appendThinkDelta = (delta: string) => {
+      if (!delta) return;
+      setLlmThinkText((prev) => {
+        const next = prev + delta;
+        const max = 48000;
+        const capped = next.length > max ? next.slice(next.length - max) : next;
+        llmThinkRef.current = capped;
+        return capped;
       });
     };
 
@@ -428,14 +441,7 @@ export default function KnowledgeBaseChat() {
           patchAssistant(acc + json.text);
           if (workspaceVisible) setWorkspaceText(acc + json.text);
         } else if (json.type === 'llm_think' && typeof json.text === 'string' && json.text) {
-          const delta = json.text;
-          setLlmThinkText((prev) => {
-            const next = prev + delta;
-            const max = 48000;
-            const capped = next.length > max ? next.slice(next.length - max) : next;
-            llmThinkRef.current = capped;
-            return capped;
-          });
+          appendThinkDelta(json.text);
         } else if (json.type === 'ai_search_token' && typeof json.text === 'string') {
           setAiSearchStreamText((s) => s + json.text);
         } else if (json.type === 'status') {
@@ -450,7 +456,37 @@ export default function KnowledgeBaseChat() {
               json.detail === 'start' ? '正在调用外部 AI 搜索…' : '外部 AI 搜索完成',
             );
           } else if (json.phase === 'ai_search_sse' && json.detail) {
-            setRetrievalStatus(`AI 搜索流: ${json.detail}`);
+            const ev = String(json.detail || '').trim();
+            setRetrievalStatus(`AI 搜索流: ${ev}`);
+            const importantEvents = new Set([
+              'connected',
+              'query_plan',
+              'cache_hit',
+              'decomposed',
+              'expanded',
+              'round_started',
+              'round_finished',
+              'llm_started',
+              'result',
+              'timeout',
+            ]);
+            if (ev && importantEvents.has(ev) && !aiSearchThinkEventsRef.current.has(ev)) {
+              aiSearchThinkEventsRef.current.add(ev);
+              const evLabelMap: Record<string, string> = {
+                connected: '已连接搜索流',
+                query_plan: '生成检索计划',
+                cache_hit: '命中缓存',
+                decomposed: '查询分解',
+                expanded: '查询扩展',
+                round_started: '检索轮次开始',
+                round_finished: '检索轮次结束',
+                llm_started: '搜索总结开始',
+                result: '搜索结果完成',
+                timeout: '搜索超时',
+              };
+              const label = evLabelMap[ev] || ev;
+              appendThinkDelta(`\n▸ AI搜索：${label}\n`);
+            }
           } else {
             setRetrievalStatus(
               [json.phase, json.detail, json.tool].filter(Boolean).join(' · ') || '检索中…',
@@ -477,6 +513,7 @@ export default function KnowledgeBaseChat() {
           setLoading(false);
           setSandboxStatus('');
           setRetrievalStatus('');
+          aiSearchThinkEventsRef.current.clear();
           setAiSearchStreamText('');
           setChat(json.messages as ChatItem[]);
           localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
@@ -491,6 +528,7 @@ export default function KnowledgeBaseChat() {
           setRetrievalStatus('');
           setLlmThinkText('');
           llmThinkRef.current = '';
+          aiSearchThinkEventsRef.current.clear();
           message.error(json.message || '流式对话出错');
         }
       };
@@ -552,6 +590,7 @@ export default function KnowledgeBaseChat() {
       message.error(err?.message || '知识库对话失败');
       setLlmThinkText('');
       llmThinkRef.current = '';
+      aiSearchThinkEventsRef.current.clear();
       setChat((prev) => {
         const last = prev[prev.length - 1];
         if (prev.length >= 2 && last?.role === 'assistant' && !last.content) {

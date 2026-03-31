@@ -797,7 +797,7 @@ export class KnowledgeBaseService {
       const topK = this.getAiSearchTopK(d);
       const { data } = await axios.post(
         `${base}/search`,
-        { query, top_k_pages: topK },
+        { query, top_k_pages: topK, search_mode: d },
         { timeout: this.getAiSearchTimeoutMs(d) },
       );
       return this.mapAisousuoSearchResponse(data);
@@ -908,7 +908,7 @@ export class KnowledgeBaseService {
         const topK = this.getAiSearchTopK(d);
         const { data: stream } = await axios.post(
           url,
-          { query, top_k_pages: topK },
+          { query, top_k_pages: topK, search_mode: d },
           { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
         );
         return await this.consumeAisousuoSearchSse(stream, sideQueue);
