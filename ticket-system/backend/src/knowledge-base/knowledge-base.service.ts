@@ -896,31 +896,27 @@ export class KnowledgeBaseService {
 
   /**
    * 混合模式下优先走 aisousuo /api/search/stream（与 AI_SEARCH_SSE_PATH，默认 /search/stream）；
-   * 失败或未启用时走同步 /api/search。
+   * quick/deep 都优先流式，失败或未启用时回退同步 /api/search。
    */
   private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
-    if (d === 'quick') {
-      // 快速模式优先单次请求，减少 SSE 链路与等待时间。
-      return this.aiSearch(query, 'quick');
-    }
     const ssePath = this.getAiSearchSsePath();
     if (ssePath) {
       try {
         const base = this.aiSearchBaseUrl.replace(/\/$/, '');
         const url = `${base}${ssePath}`;
-        const topK = this.getAiSearchTopK('deep');
+        const topK = this.getAiSearchTopK(d);
         const { data: stream } = await axios.post(
           url,
           { query, top_k_pages: topK },
-          { responseType: 'stream', timeout: this.getAiSearchTimeoutMs('deep') },
+          { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
         );
         return await this.consumeAisousuoSearchSse(stream, sideQueue);
       } catch (err: any) {
-        this.logger.warn(`AI Search SSE 失败，回退同步 /search: ${err?.message}`);
+        this.logger.warn(`AI Search SSE 失败(${d})，回退同步 /search: ${err?.message}`);
       }
     }
-    return this.aiSearch(query, 'deep');
+    return this.aiSearch(query, d);
   }
 
   /** 混合模式写入 system prompt，供模型综合（避免仅靠工具调用时模型跳过外部检索） */
