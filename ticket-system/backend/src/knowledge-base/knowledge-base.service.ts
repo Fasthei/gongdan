@@ -51,6 +51,9 @@ export class KnowledgeBaseService {
   private readonly llmApiKey: string;
   private readonly llmPrimaryModel: string;
   private readonly llmFallbackModel: string;
+  private readonly learnMcpUrl: string;
+  private readonly learnMcpEnabled: boolean;
+  private readonly learnMcpToolName: string;
   private sessionTableReady = false;
 
   constructor(
@@ -63,11 +66,14 @@ export class KnowledgeBaseService {
     this.apiKey = this.config.get<string>('KB_AGENT_API_KEY') || '';
     this.aiSearchBaseUrl =
       this.config.get<string>('AI_SEARCH_AGENT_URL') ||
-      'https://aisousuo-gxe7hphbduetgqam.eastasia-01.azurewebsites.net/api';
+      'https://aisousuogongdan-gehqaceacuf2cade.eastasia-01.azurewebsites.net';
     this.llmBaseUrl = this.config.get<string>('LLM_BASE_URL') || 'https://api.taijiaicloud.com/v1';
     this.llmApiKey = this.config.get<string>('LLM_API_KEY') || '';
     this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'claude-sonnet-4-6';
     this.llmFallbackModel = this.config.get<string>('LLM_FALLBACK_MODEL') || 'gemini-3.1-flash-lite-preview';
+    this.learnMcpUrl = this.config.get<string>('LEARN_MCP_URL') || 'https://learn.microsoft.com/api/mcp';
+    this.learnMcpEnabled = (this.config.get<string>('LEARN_MCP_ENABLED') || 'true').toLowerCase() !== 'false';
+    this.learnMcpToolName = (this.config.get<string>('LEARN_MCP_TOOL_NAME') || '').trim();
   }
 
   private get headers() {
@@ -793,14 +799,16 @@ export class KnowledgeBaseService {
   async aiSearch(query: string, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
     try {
+      const ssePath = this.getAiSearchSsePath() || '/search/stream';
       const base = this.aiSearchBaseUrl.replace(/\/$/, '');
+      const url = `${base}${ssePath.startsWith('/') ? ssePath : `/${ssePath}`}`;
       const topK = this.getAiSearchTopK(d);
-      const { data } = await axios.post(
-        `${base}/search`,
+      const { data: stream } = await axios.post(
+        url,
         { query, top_k_pages: topK, search_mode: d },
-        { timeout: this.getAiSearchTimeoutMs(d) },
+        { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
       );
-      return this.mapAisousuoSearchResponse(data);
+      return await this.consumeAisousuoSearchSse(stream, new KbSideQueue());
     } catch (err: any) {
       this.logger.warn(`AI 搜索调用失败(${d}): ${err.message}`);
       return { answer: '', sources: [], followUps: [], confidence: undefined };
@@ -819,6 +827,82 @@ export class KnowledgeBaseService {
       maxRetries: 0,
       streaming,
     });
+  }
+
+  private async callLearnMcp(method: string, params: Record<string, any>) {
+    const payload = {
+      jsonrpc: '2.0',
+      id: randomUUID(),
+      method,
+      params,
+    };
+    const { data } = await axios.post(this.learnMcpUrl, payload, {
+      timeout: 20000,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+      },
+    });
+    return data;
+  }
+
+  private pickLearnSearchTool(tools: any[]): any | null {
+    if (!Array.isArray(tools) || tools.length === 0) return null;
+    if (this.learnMcpToolName) {
+      const exact = tools.find((t) => String(t?.name || '') === this.learnMcpToolName);
+      if (exact) return exact;
+    }
+    const scored = tools
+      .map((t) => {
+        const name = String(t?.name || '').toLowerCase();
+        let s = 0;
+        if (name.includes('search')) s += 3;
+        if (name.includes('learn')) s += 2;
+        if (name.includes('doc')) s += 2;
+        if (name.includes('article')) s += 1;
+        return { t, s };
+      })
+      .sort((a, b) => b.s - a.s);
+    return scored[0]?.s > 0 ? scored[0].t : tools[0];
+  }
+
+  private buildLearnToolArgs(schema: any, query: string): Record<string, any> {
+    const props = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+    const keys = Object.keys(props);
+    const preferred = keys.find((k) => /(query|q|question|keyword|search|text)/i.test(k)) || keys[0];
+    if (!preferred) return { query };
+    return { [preferred]: query };
+  }
+
+  private async learnMcpSearch(query: string): Promise<string> {
+    if (!this.learnMcpEnabled) return JSON.stringify({ disabled: true });
+    try {
+      const listed = await this.callLearnMcp('tools/list', {});
+      const tools = listed?.result?.tools || listed?.tools || [];
+      const selected = this.pickLearnSearchTool(tools);
+      if (!selected?.name) {
+        return JSON.stringify({ error: 'learn mcp tools/list returned no callable tool' });
+      }
+      const args = this.buildLearnToolArgs(selected?.inputSchema, query);
+      const called = await this.callLearnMcp('tools/call', {
+        name: selected.name,
+        arguments: args,
+      });
+      const out = called?.result ?? called;
+      const text = JSON.stringify(
+        {
+          tool: selected.name,
+          arguments: args,
+          result: out,
+        },
+        null,
+        2,
+      );
+      return text.length > 12000 ? `${text.slice(0, 12000)}\n... [truncated]` : text;
+    } catch (e: any) {
+      this.logger.warn(`Learn MCP tool failed: ${e?.message}`);
+      return JSON.stringify({ error: e?.message || 'learn mcp call failed' });
+    }
   }
 
   private chunkToLlmText(chunk: any): string {
@@ -895,8 +979,8 @@ export class KnowledgeBaseService {
   }
 
   /**
-   * 混合模式下优先走 aisousuo /api/search/stream（与 AI_SEARCH_SSE_PATH，默认 /search/stream）；
-   * quick/deep 都优先流式，失败或未启用时回退同步 /api/search。
+   * 混合模式下统一走 aisousuo /search/stream（与 AI_SEARCH_SSE_PATH，默认 /search/stream）；
+   * quick/deep 都优先流式，失败时回退到“无事件流式调用”（仍是 /search/stream）。
    */
   private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
@@ -913,7 +997,7 @@ export class KnowledgeBaseService {
         );
         return await this.consumeAisousuoSearchSse(stream, sideQueue);
       } catch (err: any) {
-        this.logger.warn(`AI Search SSE 失败(${d})，回退同步 /search: ${err?.message}`);
+        this.logger.warn(`AI Search SSE 失败(${d})，回退无事件流式调用: ${err?.message}`);
       }
     }
     return this.aiSearch(query, d);
@@ -1240,7 +1324,21 @@ export class KnowledgeBaseService {
           schema: z.object({ question: z.string() }),
         },
       );
-      return [internalTool];
+      const learnMcpTool = tool(
+        async ({ question: qtext }: { question: string }) => {
+          q.push({ type: 'status', phase: 'learn_mcp', detail: 'start', tool: 'learn_mcp_search' });
+          const res = await this.learnMcpSearch(qtext);
+          q.push({ type: 'status', phase: 'learn_mcp', detail: 'done', tool: 'learn_mcp_search' });
+          return res;
+        },
+        {
+          name: 'learn_mcp_search',
+          description:
+            '查询 Microsoft Learn MCP（官方文档），返回与问题相关的最新文档片段与链接；适合 Azure/.NET/Microsoft 技术问题。',
+          schema: z.object({ question: z.string() }),
+        },
+      );
+      return [internalTool, learnMcpTool];
     };
 
     let toolsArr: ReturnType<typeof mkTools> | any[] = [];
@@ -1614,7 +1712,20 @@ export class KnowledgeBaseService {
           }),
         },
       );
-      tools = [internalTool];
+      const learnMcpTool = tool(
+        async ({ question: q }: { question: string }) => {
+          return this.learnMcpSearch(q);
+        },
+        {
+          name: 'learn_mcp_search',
+          description:
+            '查询 Microsoft Learn MCP（官方文档），返回与问题相关的最新文档片段与链接；适合 Azure/.NET/Microsoft 技术问题。',
+          schema: z.object({
+            question: z.string(),
+          }),
+        },
+      );
+      tools = [internalTool, learnMcpTool];
       systemPrompt = [
         '你是工单系统知识库助手，必须通过工具获取事实，不得编造。',
         `当前检索模式: ${searchMode}`,
