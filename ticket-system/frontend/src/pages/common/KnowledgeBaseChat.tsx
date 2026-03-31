@@ -13,6 +13,11 @@ import {
   CopyOutlined,
   UploadOutlined,
   InfoCircleOutlined,
+  FileWordOutlined,
+  FileExcelOutlined,
+  FilePptOutlined,
+  EditOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -83,6 +88,14 @@ export default function KnowledgeBaseChat() {
   const [docFileList, setDocFileList] = useState<UploadFile[]>([]);
   const [docContextText, setDocContextText] = useState('');
   const [docContextName, setDocContextName] = useState('');
+  const [writingMode, setWritingMode] = useState(false);
+  const [workspaceText, setWorkspaceText] = useState('');
+  const [docGenModalOpen, setDocGenModalOpen] = useState(false);
+  const [docGenLoading, setDocGenLoading] = useState(false);
+  const [docGenType, setDocGenType] = useState<'ppt' | 'word' | 'table'>('word');
+  const [docGenFormat, setDocGenFormat] = useState<'xlsx' | 'csv'>('xlsx');
+  const [docGenTitle, setDocGenTitle] = useState('');
+  const [docGenResult, setDocGenResult] = useState<{ filename: string; url: string; outputType: string } | null>(null);
   const [sandboxStatus, setSandboxStatus] = useState('');
   const [retrievalStatus, setRetrievalStatus] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -321,6 +334,7 @@ export default function KnowledgeBaseChat() {
           }
         } else if (json.type === 'token' && json.source === 'llm' && typeof json.text === 'string') {
           patchAssistant(acc + json.text);
+          if (writingMode) setWorkspaceText(acc + json.text);
         } else if (json.type === 'llm_think' && typeof json.text === 'string' && json.text) {
           const delta = json.text;
           setLlmThinkText((prev) => {
@@ -374,6 +388,11 @@ export default function KnowledgeBaseChat() {
           setAiSearchStreamText('');
           setChat(json.messages as ChatItem[]);
           localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
+          if (writingMode) {
+            const msgs = json.messages as ChatItem[];
+            const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant');
+            if (lastAssistant?.content) setWorkspaceText(lastAssistant.content);
+          }
         } else if (json.type === 'error') {
           setLoading(false);
           setSandboxStatus('');
@@ -559,7 +578,7 @@ export default function KnowledgeBaseChat() {
                 flex: 1,
                 display: 'flex',
                 flexDirection: 'row',
-                gap: 24,
+              gap: writingMode ? 16 : 24,
                 padding: '0 24px',
                 minHeight: 0,
                 maxWidth: 1200,
@@ -572,7 +591,7 @@ export default function KnowledgeBaseChat() {
               <div
                 ref={messagesRef}
                 style={{
-                  flex: 1,
+                  flex: writingMode ? '0 0 58%' : 1,
                   minWidth: 0,
                   maxWidth: 800,
                   overflowY: 'auto',
@@ -641,6 +660,39 @@ export default function KnowledgeBaseChat() {
                     </div>
                   )}
               </div>
+
+              {writingMode ? (
+                <div
+                  style={{
+                    flex: '0 0 42%',
+                    minWidth: 320,
+                    borderLeft: '1px solid #f0f0f0',
+                    padding: '24px 0 24px 16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text strong>写作工作区</Text>
+                    <Space size={6}>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={() => setDocGenModalOpen(true)}>
+                        文档生成
+                      </Button>
+                      <Button size="small" onClick={() => setWorkspaceText('')}>清空</Button>
+                    </Space>
+                  </div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    在写作模式中，模型输出会同步到这里，你可以继续编辑后生成 Word/PPT/Excel。
+                  </Text>
+                  <TextArea
+                    value={workspaceText}
+                    onChange={(e) => setWorkspaceText(e.target.value)}
+                    placeholder="在此编辑你的文稿..."
+                    style={{ flex: 1, minHeight: 360 }}
+                  />
+                </div>
+              ) : null}
 
               {/* Right Sidebar — 与左侧同高，内容多时在侧栏内滚动，不随对话滚动上移 */}
               <div
@@ -999,6 +1051,28 @@ export default function KnowledgeBaseChat() {
                   <Button
                     shape="round"
                     size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => setWritingMode((v) => !v)}
+                    style={{
+                      border: 'none',
+                      boxShadow: 'none',
+                      background: writingMode ? '#262626' : '#f1f3f4',
+                      color: writingMode ? '#fff' : '#5f6368',
+                    }}
+                  >
+                    写作模式
+                  </Button>
+                  <Button
+                    shape="round"
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={() => setDocGenModalOpen(true)}
+                  >
+                    文档生成
+                  </Button>
+                  <Button
+                    shape="round"
+                    size="small"
                     disabled={!sandboxMode}
                     onClick={() => setExampleModalOpen(true)}
                   >
@@ -1025,6 +1099,88 @@ export default function KnowledgeBaseChat() {
           </div>
         </div>
       )}
+
+      <Modal
+        title="文档生成"
+        open={docGenModalOpen}
+        onCancel={() => setDocGenModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setDocGenModalOpen(false)}>关闭</Button>,
+          <Button
+            key="gen"
+            type="primary"
+            loading={docGenLoading}
+            onClick={async () => {
+              const seed = workspaceText.trim() || chat.filter((m) => m.role === 'assistant').slice(-1)[0]?.content?.trim() || '';
+              if (!seed) {
+                message.warning('请先在工作区写内容或先让助手输出内容');
+                return;
+              }
+              setDocGenLoading(true);
+              setDocGenResult(null);
+              try {
+                const prompt = seed.length > 12000 ? `${seed.slice(0, 12000)}\n... [内容已截断]` : seed;
+                const { data } = await api.post('/knowledge-base/doc-generate', {
+                  prompt,
+                  outputType: docGenType,
+                  title: docGenTitle.trim() || undefined,
+                  ...(docGenType === 'table' ? { format: docGenFormat } : {}),
+                });
+                setDocGenResult({
+                  filename: data?.filename || '未命名文件',
+                  url: data?.url || '',
+                  outputType: data?.outputType || docGenType,
+                });
+                message.success('文档生成成功');
+              } catch (e: any) {
+                message.error(e?.response?.data?.message || e?.message || '文档生成失败');
+              } finally {
+                setDocGenLoading(false);
+              }
+            }}
+          >
+            生成文档
+          </Button>,
+        ]}
+        width={720}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Space wrap>
+            <Button type={docGenType === 'word' ? 'primary' : 'default'} icon={<FileWordOutlined />} onClick={() => setDocGenType('word')}>Word</Button>
+            <Button type={docGenType === 'ppt' ? 'primary' : 'default'} icon={<FilePptOutlined />} onClick={() => setDocGenType('ppt')}>PPT</Button>
+            <Button type={docGenType === 'table' ? 'primary' : 'default'} icon={<FileExcelOutlined />} onClick={() => setDocGenType('table')}>Excel/CSV</Button>
+            {docGenType === 'table' ? (
+              <Select
+                size="small"
+                value={docGenFormat}
+                options={[{ label: 'xlsx', value: 'xlsx' }, { label: 'csv', value: 'csv' }]}
+                onChange={(v) => setDocGenFormat(v)}
+                style={{ width: 100 }}
+              />
+            ) : null}
+          </Space>
+          <Input
+            placeholder="文档标题（可选）"
+            value={docGenTitle}
+            onChange={(e) => setDocGenTitle(e.target.value)}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            生成内容来源：优先取写作工作区内容；若工作区为空，则取最近一条助手回答。
+          </Text>
+          {docGenResult ? (
+            <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: 12 }}>
+              <Text strong>已生成：{docGenResult.filename}</Text>
+              <div style={{ marginTop: 8 }}>
+                {docGenResult.url ? (
+                  <a href={docGenResult.url} target="_blank" rel="noreferrer">下载文档</a>
+                ) : (
+                  <Text type="warning">未返回可下载链接</Text>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </Space>
+      </Modal>
 
       <Modal
         title="临时文档上下文（仅本轮，不入历史）"

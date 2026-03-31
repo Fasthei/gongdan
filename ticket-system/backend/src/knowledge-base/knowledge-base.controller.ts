@@ -90,6 +90,30 @@ export class KnowledgeBaseController {
     });
   }
 
+  @Post('doc-generate')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  async docGenerate(
+    @Body()
+    body: {
+      prompt: string;
+      outputType: 'ppt' | 'word' | 'table';
+      title?: string;
+      format?: 'xlsx' | 'csv';
+      numSlides?: number;
+    },
+  ) {
+    if (!body.prompt?.trim()) {
+      throw new ForbiddenException('prompt 不能为空');
+    }
+    return this.kbService.generateDocument({
+      prompt: body.prompt.trim(),
+      outputType: body.outputType,
+      title: body.title?.trim(),
+      format: body.format,
+      numSlides: body.numSlides,
+    });
+  }
+
   @Post('chat')
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
   async chat(

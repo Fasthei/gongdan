@@ -33,6 +33,7 @@ export interface KBChatMessage {
 }
 
 type AiSearchDepth = 'quick' | 'deep';
+type DocOutputType = 'ppt' | 'word' | 'table';
 
 @Injectable()
 export class KnowledgeBaseService {
@@ -245,6 +246,52 @@ export class KnowledgeBaseService {
       this.logger.error(`知识库资料上传失败: ${err.message}`);
       throw new Error(err.response?.data?.message || '知识库资料上传失败');
     }
+  }
+
+  async generateDocument(params: {
+    prompt: string;
+    outputType: DocOutputType;
+    title?: string;
+    format?: 'xlsx' | 'csv';
+    numSlides?: number;
+  }) {
+    const base = (this.config.get<string>('DOC_CREATOR_BASE_URL') || 'http://doc-creator-agent-b0d02105-db4b3a.taijiagnet.com')
+      .trim()
+      .replace(/\/$/, '');
+    const key = (this.config.get<string>('DOC_CREATOR_API_KEY') || '').trim();
+    if (!key) {
+      throw new Error('未配置 DOC_CREATOR_API_KEY，无法生成文档');
+    }
+
+    const body: Record<string, any> = {
+      prompt: params.prompt,
+      output_type: params.outputType,
+    };
+    if (params.title) body.title = params.title;
+    if (params.outputType === 'table' && params.format) body.format = params.format;
+    if (params.outputType === 'ppt' && Number.isFinite(params.numSlides)) {
+      body.num_slides = Math.max(1, Math.min(50, Number(params.numSlides)));
+    }
+
+    const { data } = await axios.post(`${base}/api/v1/generate`, body, {
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': key,
+        Authorization: `Bearer ${key}`,
+      },
+      timeout: 120000,
+    });
+
+    const rawUrl = typeof data?.url === 'string' ? data.url.trim() : '';
+    const absoluteUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : rawUrl ? `${base}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}` : '';
+
+    return {
+      success: !!data?.success,
+      filename: data?.filename || '',
+      outputType: data?.output_type || params.outputType,
+      url: absoluteUrl,
+      format: data?.format || body.format || undefined,
+    };
   }
 
   private async ensureSessionTables() {
