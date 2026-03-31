@@ -809,8 +809,13 @@ export class KnowledgeBaseService {
     return Number(this.config.get<string>('AI_SEARCH_TIMEOUT_MS') || 120000) || 120000;
   }
 
+  private toAisouSearchMode(depth: AiSearchDepth): 'fast' | 'deep' {
+    return depth === 'quick' ? 'fast' : 'deep';
+  }
+
   async aiSearch(query: string, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
+    const mode = this.toAisouSearchMode(d);
     try {
       const ssePath = this.getAiSearchSsePath() || '/search/stream';
       const base = this.aiSearchBaseUrl.replace(/\/$/, '');
@@ -818,7 +823,7 @@ export class KnowledgeBaseService {
       const topK = this.getAiSearchTopK(d);
       const { data: stream } = await axios.post(
         url,
-        { query, top_k_pages: topK, search_mode: d },
+        { query, top_k_pages: topK, search_mode: mode },
         { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
       );
       return await this.consumeAisousuoSearchSse(stream, new KbSideQueue());
@@ -997,6 +1002,7 @@ export class KnowledgeBaseService {
    */
   private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
+    const mode = this.toAisouSearchMode(d);
     const ssePath = this.getAiSearchSsePath();
     if (ssePath) {
       try {
@@ -1005,7 +1011,7 @@ export class KnowledgeBaseService {
         const topK = this.getAiSearchTopK(d);
         const { data: stream } = await axios.post(
           url,
-          { query, top_k_pages: topK, search_mode: d },
+          { query, top_k_pages: topK, search_mode: mode },
           { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
         );
         return await this.consumeAisousuoSearchSse(stream, sideQueue);
