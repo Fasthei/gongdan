@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload } from 'antd';
+import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload, Segmented, Select } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import {
   RobotOutlined,
@@ -39,6 +39,13 @@ const CURL_EXAMPLE_TEMPLATE = `curl --location 'https://YOUR_RESOURCE.cognitives
 `;
 
 type ChatItem = { role: 'user' | 'assistant'; content: string; searchMode?: 'internal' | 'hybrid' };
+type ThinkRound = {
+  id: string;
+  question: string;
+  think: string;
+  searchMode: 'internal' | 'hybrid';
+  createdAt: string;
+};
 
 export default function KnowledgeBaseChat() {
   const { user } = useAuth();
@@ -62,6 +69,10 @@ export default function KnowledgeBaseChat() {
     const v = localStorage.getItem('kb-chat-search-mode');
     return v === 'hybrid' ? 'hybrid' : 'internal';
   });
+  const [aiSearchDepth, setAiSearchDepth] = useState<'quick' | 'deep'>(() => {
+    const v = localStorage.getItem('kb-ai-search-depth');
+    return v === 'quick' ? 'quick' : 'deep';
+  });
   const [usedSearchMode, setUsedSearchMode] = useState<'internal' | 'hybrid'>('internal');
   const [sandboxMode, setSandboxMode] = useState(() => localStorage.getItem('kb-sandbox-mode') === '1');
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
@@ -73,6 +84,13 @@ export default function KnowledgeBaseChat() {
 
   const [chatHistoryList, setChatHistoryList] = useState<any[]>([]);
   const [aiSearchStreamText, setAiSearchStreamText] = useState('');
+  /** 主模型 reasoning / Agent 工具步骤（SSE llm_think），与左侧最终回答正文分离 */
+  const [llmThinkText, setLlmThinkText] = useState('');
+  const [thinkHistory, setThinkHistory] = useState<ThinkRound[]>([]);
+  const [ticketOptions, setTicketOptions] = useState<Array<{ label: string; value: string }>>([]);
+  const [selectedTicketId, setSelectedTicketId] = useState('');
+  const [ticketLoading, setTicketLoading] = useState(false);
+  const llmThinkRef = useRef('');
 
   const canAsk = useMemo(() => {
     if (isCustomer) return !!verifiedCode;
@@ -112,7 +130,53 @@ export default function KnowledgeBaseChat() {
         }
       })
       .catch(() => {});
+
+    // 右侧工单明细选择器：拉取可选工单列表（按当前用户权限返回）
+    api.get('/tickets', { params: { page: 1, pageSize: 100 } })
+      .then(({ data }) => {
+        const list = Array.isArray(data?.tickets) ? data.tickets : [];
+        setTicketOptions(
+          list.map((t: any) => ({
+            value: t.id,
+            label: `${t.ticketNumber || t.id} · ${t.status || ''}`,
+          })),
+        );
+      })
+      .catch(() => {});
   }, [sessionId]);
+
+  const injectTicketToQuestion = async () => {
+    if (!selectedTicketId) return message.warning('请先选择工单');
+    setTicketLoading(true);
+    try {
+      const { data } = await api.get(`/tickets/${selectedTicketId}`);
+      const t = data?.ticket || data;
+      if (!t) throw new Error('工单不存在');
+      const detail = [
+        `工单编号: ${t.ticketNumber || t.id || ''}`,
+        `状态: ${t.status || ''}`,
+        `平台: ${t.platform || ''}`,
+        `模型: ${t.modelUsed || ''}`,
+        t.framework ? `框架/应用: ${t.framework}` : '',
+        t.networkEnv ? `网络环境: ${t.networkEnv}` : '',
+        t.accountInfo ? `账号信息: ${t.accountInfo}` : '',
+        `问题描述:\n${t.description || ''}`,
+        t.requestExample ? `请求示例:\n${t.requestExample}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+      const prefixed = `请基于以下工单信息协助排查并给出解决建议：\n\n${detail}`;
+      setQuestion((prev) => (prev?.trim() ? `${prev}\n\n---\n${prefixed}` : prefixed));
+      if (sandboxMode && t.requestExample && !requestExampleText.trim()) {
+        setRequestExampleText(String(t.requestExample));
+      }
+      message.success('工单明细已加载到输入框');
+    } catch (e: any) {
+      message.error(e?.message || '加载工单明细失败');
+    } finally {
+      setTicketLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (messagesRef.current) {
@@ -162,6 +226,8 @@ export default function KnowledgeBaseChat() {
     setQuestion('');
     setLoading(true);
     setAiSearchStreamText('');
+    setLlmThinkText('');
+    llmThinkRef.current = '';
     setSandboxStatus('');
     setRetrievalStatus('');
     let acc = '';
@@ -188,6 +254,7 @@ export default function KnowledgeBaseChat() {
           sessionId: sessionId || undefined,
           message: userMsg.content,
           searchMode,
+          ...(searchMode === 'hybrid' ? { aiSearchDepth } : {}),
           ...(sandboxMode && requestExampleText.trim()
             ? { useSandbox: true, requestExample: requestExampleText.trim() }
             : {}),
@@ -236,6 +303,15 @@ export default function KnowledgeBaseChat() {
           }
         } else if (json.type === 'token' && json.source === 'llm' && typeof json.text === 'string') {
           patchAssistant(acc + json.text);
+        } else if (json.type === 'llm_think' && typeof json.text === 'string' && json.text) {
+          const delta = json.text;
+          setLlmThinkText((prev) => {
+            const next = prev + delta;
+            const max = 48000;
+            const capped = next.length > max ? next.slice(next.length - max) : next;
+            llmThinkRef.current = capped;
+            return capped;
+          });
         } else if (json.type === 'ai_search_token' && typeof json.text === 'string') {
           setAiSearchStreamText((s) => s + json.text);
         } else if (json.type === 'status') {
@@ -261,9 +337,31 @@ export default function KnowledgeBaseChat() {
           setFollowUps(Array.isArray(json.followUps) ? json.followUps : []);
         } else if (json.type === 'done' && Array.isArray(json.messages)) {
           gotDone = true;
+          if (llmThinkRef.current.trim()) {
+            const currentThink = llmThinkRef.current.trim();
+            setThinkHistory((prev) => [
+              {
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                question: userMsg.content,
+                think: currentThink,
+                searchMode: roundMode,
+                createdAt: new Date().toISOString(),
+              },
+              ...prev,
+            ].slice(0, 20));
+          }
+          setLoading(false);
+          setSandboxStatus('');
+          setRetrievalStatus('');
+          setAiSearchStreamText('');
           setChat(json.messages as ChatItem[]);
           localStorage.setItem('kb-chat-history', JSON.stringify(json.messages));
         } else if (json.type === 'error') {
+          setLoading(false);
+          setSandboxStatus('');
+          setRetrievalStatus('');
+          setLlmThinkText('');
+          llmThinkRef.current = '';
           message.error(json.message || '流式对话出错');
         }
       };
@@ -310,6 +408,8 @@ export default function KnowledgeBaseChat() {
       }
     } catch (err: any) {
       message.error(err?.message || '知识库对话失败');
+      setLlmThinkText('');
+      llmThinkRef.current = '';
       setChat((prev) => {
         const last = prev[prev.length - 1];
         if (prev.length >= 2 && last?.role === 'assistant' && !last.content) {
@@ -338,6 +438,9 @@ export default function KnowledgeBaseChat() {
               setChat([]);
               setSources([]);
               setFollowUps([]);
+              setLlmThinkText('');
+              setThinkHistory([]);
+              llmThinkRef.current = '';
               setSessionId('');
               localStorage.removeItem('kb-chat-history');
               localStorage.removeItem('kb-chat-session-id');
@@ -376,6 +479,9 @@ export default function KnowledgeBaseChat() {
                   setChat([]);
                   setSources([]);
                   setFollowUps([]);
+                  setLlmThinkText('');
+                  setThinkHistory([]);
+                  llmThinkRef.current = '';
                   setSessionId('');
                   localStorage.removeItem('kb-chat-history');
                   localStorage.removeItem('kb-chat-session-id');
@@ -532,35 +638,89 @@ export default function KnowledgeBaseChat() {
                     loading ||
                     !!sandboxStatus ||
                     !!retrievalStatus ||
+                    !!llmThinkText ||
+                    thinkHistory.length > 0 ||
                     sources.length > 0 ||
                     followUps.length > 0
                       ? 'block'
                       : 'none',
                 }}
               >
-                {(loading || aiSearchStreamText || sandboxStatus || retrievalStatus) && (
+                {(loading || llmThinkText || thinkHistory.length > 0) && (
                   <div style={{ marginBottom: 24, padding: 16, background: '#f8f9fa', borderRadius: 12 }}>
                     <Text strong style={{ display: 'block', marginBottom: 12 }}>思考状态</Text>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                      {sandboxStatus ? (
-                        <Text type="secondary" style={{ fontSize: 13 }}>
-                          <Spin size="small" style={{ marginRight: 8 }} /> {sandboxStatus}
-                        </Text>
+                      {loading ? (
+                        <>
+                          {sandboxStatus ? (
+                            <Text type="secondary" style={{ fontSize: 13 }}>
+                              <Spin size="small" style={{ marginRight: 8 }} /> {sandboxStatus}
+                            </Text>
+                          ) : null}
+                          {retrievalStatus ? (
+                            <Text type="secondary" style={{ fontSize: 13 }}>
+                              <Spin size="small" style={{ marginRight: 8 }} />
+                              {retrievalStatus}
+                            </Text>
+                          ) : null}
+                          <Text type="secondary" style={{ fontSize: 13 }}>
+                            <Spin size="small" style={{ marginRight: 8 }} /> 分析问题中…
+                          </Text>
+                          {usedSearchMode === 'hybrid' ? (
+                            <Text type="secondary" style={{ fontSize: 13 }}>
+                              <Spin size="small" style={{ marginRight: 8 }} /> 调用 AI 搜索 Agent…
+                            </Text>
+                          ) : null}
+                          <Text type="secondary" style={{ fontSize: 13 }}>
+                            <Spin size="small" style={{ marginRight: 8 }} /> 检索内部知识库…
+                          </Text>
+                        </>
                       ) : null}
-                      {retrievalStatus ? (
-                        <Text type="secondary" style={{ fontSize: 13 }}>
-                          {loading ? <Spin size="small" style={{ marginRight: 8 }} /> : null}
-                          {retrievalStatus}
-                        </Text>
-                      ) : null}
-                      <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 分析问题中...</Text>
-                      {usedSearchMode === 'hybrid' && <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 调用 AI 搜索 Agent...</Text>}
-                      <Text type="secondary" style={{ fontSize: 13 }}><Spin size="small" style={{ marginRight: 8 }} /> 检索内部知识库...</Text>
                       {aiSearchStreamText ? (
                         <div style={{ marginTop: 8, maxHeight: 160, overflow: 'auto' }}>
-                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>AI 搜索（流式）</Text>
+                          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                            AI 搜索（流式）
+                          </Text>
                           <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{aiSearchStreamText}</Text>
                         </div>
+                      ) : null}
+                      {llmThinkText ? (
+                        <details open style={{ marginTop: loading ? 8 : 0 }}>
+                          <summary style={{ cursor: 'pointer', color: '#5f6368', fontSize: 12 }}>
+                            当前轮主模型推理 / Agent 步骤
+                          </summary>
+                          <div style={{ maxHeight: loading ? 220 : 360, overflow: 'auto', marginTop: 8 }}>
+                            <div className="markdown-body" style={{ fontSize: 13, lineHeight: 1.55, color: '#5f6368' }}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{llmThinkText}</ReactMarkdown>
+                            </div>
+                          </div>
+                        </details>
+                      ) : null}
+                      {thinkHistory.length > 0 ? (
+                        <details style={{ marginTop: 8 }}>
+                          <summary style={{ cursor: 'pointer', color: '#5f6368', fontSize: 12 }}>
+                            历史思考（按轮次，最近 {thinkHistory.length} 轮）
+                          </summary>
+                          <div style={{ marginTop: 8, maxHeight: 320, overflow: 'auto' }}>
+                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              {thinkHistory.map((r) => (
+                                <details key={r.id} style={{ background: '#fff', borderRadius: 8, padding: '8px 10px' }}>
+                                  <summary style={{ cursor: 'pointer', fontSize: 12, color: '#5f6368' }}>
+                                    {new Date(r.createdAt).toLocaleTimeString()} · {r.searchMode === 'hybrid' ? 'AI 搜索' : '内部知识库'} · {r.question.slice(0, 32)}
+                                  </summary>
+                                  <div style={{ marginTop: 8 }}>
+                                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                                      问题：{r.question}
+                                    </Text>
+                                    <div className="markdown-body" style={{ fontSize: 12, lineHeight: 1.5, color: '#5f6368' }}>
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.think}</ReactMarkdown>
+                                    </div>
+                                  </div>
+                                </details>
+                              ))}
+                            </Space>
+                          </div>
+                        </details>
                       ) : null}
                     </Space>
                   </div>
@@ -607,6 +767,25 @@ export default function KnowledgeBaseChat() {
                     </Space>
                   </div>
                 )}
+
+                <div style={{ marginBottom: 24 }}>
+                  <Text strong style={{ display: 'block', marginBottom: 12 }}>工单明细</Text>
+                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                    <Select
+                      showSearch
+                      allowClear
+                      placeholder="选择工单后可注入对话"
+                      optionFilterProp="label"
+                      value={selectedTicketId || undefined}
+                      options={ticketOptions}
+                      onChange={(v) => setSelectedTicketId(v || '')}
+                      style={{ width: '100%' }}
+                    />
+                    <Button size="small" onClick={() => void injectTicketToQuestion()} loading={ticketLoading} disabled={!selectedTicketId}>
+                      加载到对话输入框
+                    </Button>
+                  </Space>
+                </div>
 
                 {followUps.length > 0 && (
                   <div>
@@ -674,6 +853,21 @@ export default function KnowledgeBaseChat() {
                   >
                     AI 搜索
                   </Button>
+                  {searchMode === 'hybrid' ? (
+                    <Segmented
+                      size="small"
+                      options={[
+                        { label: '快速搜索', value: 'quick' },
+                        { label: '深度搜索', value: 'deep' },
+                      ]}
+                      value={aiSearchDepth}
+                      onChange={(v) => {
+                        const next = v === 'quick' ? 'quick' : 'deep';
+                        setAiSearchDepth(next);
+                        localStorage.setItem('kb-ai-search-depth', next);
+                      }}
+                    />
+                  ) : null}
                   <Button
                     shape="round"
                     size="small"

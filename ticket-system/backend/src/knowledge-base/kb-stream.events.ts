@@ -2,6 +2,8 @@
 export type KbStreamPayload =
   | { type: 'session'; sessionId: string; usedSearchMode: 'internal' | 'hybrid' }
   | { type: 'status'; phase: string; detail?: string; tool?: string }
+  /** 主模型 reasoning / thinking 流式片段，或 Agent 工具步骤（非最终回答正文） */
+  | { type: 'llm_think'; text: string }
   | { type: 'token'; text: string; source: 'llm' }
   | { type: 'ai_search_token'; text: string }
   | { type: 'meta'; sources: unknown[]; followUps: string[]; confidence?: number }

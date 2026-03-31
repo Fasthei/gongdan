@@ -53,6 +53,30 @@ export class KnowledgeBaseController {
     return this.kbService.smartQuery(body.question, body.topK, body.history);
   }
 
+  @Post('ai-search/quick')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  async aiSearchQuick(
+    @Body() body: { query: string; customerCode?: string },
+    @Request() req: any,
+  ) {
+    if (!body.query?.trim()) {
+      throw new ForbiddenException('query 不能为空');
+    }
+    if (req.user?.role === 'CUSTOMER') {
+      if (!body.customerCode) {
+        throw new ForbiddenException('客户使用知识库前请先输入客户编号');
+      }
+      const customer = await this.prisma.customer.findUnique({
+        where: { customerCode: body.customerCode },
+        select: { id: true },
+      });
+      if (!customer || customer.id !== req.user.customerId) {
+        throw new ForbiddenException('客户编号校验失败，无法使用知识库');
+      }
+    }
+    return this.kbService.aiSearch(body.query.trim(), 'quick');
+  }
+
   @Post('upload')
   @Roles('ADMIN')
   @UseInterceptors(FileInterceptor('file'))
@@ -74,6 +98,7 @@ export class KnowledgeBaseController {
       message: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
+      aiSearchDepth?: 'quick' | 'deep';
       useSandbox?: boolean;
       requestExample?: string;
     },
@@ -101,6 +126,7 @@ export class KnowledgeBaseController {
       customerCode: body.customerCode,
       message: body.message.trim(),
       searchMode: body.searchMode,
+      aiSearchDepth: body.aiSearchDepth,
       useSandbox: body.useSandbox,
       requestExample: body.requestExample?.trim(),
     });
@@ -116,6 +142,7 @@ export class KnowledgeBaseController {
       message: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
+      aiSearchDepth?: 'quick' | 'deep';
       useSandbox?: boolean;
       requestExample?: string;
     },
@@ -160,6 +187,7 @@ export class KnowledgeBaseController {
         customerCode: body.customerCode,
         message: body.message.trim(),
         searchMode: body.searchMode,
+        aiSearchDepth: body.aiSearchDepth,
         useSandbox: body.useSandbox,
         requestExample: body.requestExample?.trim(),
       })) {

@@ -32,6 +32,8 @@ export interface KBChatMessage {
   createdAt?: string;
 }
 
+type AiSearchDepth = 'quick' | 'deep';
+
 @Injectable()
 export class KnowledgeBaseService {
   private readonly logger = new Logger(KnowledgeBaseService.name);
@@ -607,18 +609,37 @@ export class KnowledgeBaseService {
     return mapped;
   }
 
-  async aiSearch(query: string) {
+  private getAiSearchDepth(depth?: AiSearchDepth): AiSearchDepth {
+    return depth === 'quick' ? 'quick' : 'deep';
+  }
+
+  private getAiSearchTopK(depth: AiSearchDepth): number {
+    if (depth === 'quick') {
+      return Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES_QUICK') || 1) || 1;
+    }
+    return Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES') || 3) || 3;
+  }
+
+  private getAiSearchTimeoutMs(depth: AiSearchDepth): number {
+    if (depth === 'quick') {
+      return Number(this.config.get<string>('AI_SEARCH_TIMEOUT_MS_QUICK') || 15000) || 15000;
+    }
+    return Number(this.config.get<string>('AI_SEARCH_TIMEOUT_MS') || 120000) || 120000;
+  }
+
+  async aiSearch(query: string, depth?: AiSearchDepth) {
+    const d = this.getAiSearchDepth(depth);
     try {
       const base = this.aiSearchBaseUrl.replace(/\/$/, '');
-      const topK = Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES') || 3) || 3;
+      const topK = this.getAiSearchTopK(d);
       const { data } = await axios.post(
         `${base}/search`,
         { query, top_k_pages: topK },
-        { timeout: 120000 },
+        { timeout: this.getAiSearchTimeoutMs(d) },
       );
       return this.mapAisousuoSearchResponse(data);
     } catch (err: any) {
-      this.logger.warn(`AI 搜索调用失败: ${err.message}`);
+      this.logger.warn(`AI 搜索调用失败(${d}): ${err.message}`);
       return { answer: '', sources: [], followUps: [], confidence: undefined };
     }
   }
@@ -654,27 +675,89 @@ export class KnowledgeBaseService {
   }
 
   /**
+   * 从 Chat 模型流式 chunk 中提取「推理 / 思考」增量（OpenAI Responses reasoning、Ollama reasoning_content、通用 reasoning 块等）。
+   * 与 {@link chunkToLlmText} 分离，避免把 CoT 混进对用户展示的正文。
+   */
+  private chunkToLlmReasoningDelta(chunk: any): string {
+    if (!chunk) return '';
+    const c = chunk.content;
+    if (Array.isArray(c)) {
+      const fromBlocks = c
+        .map((part: any) => {
+          if (!part || typeof part !== 'object') return '';
+          const t = part.type;
+          if (t === 'reasoning') {
+            if (typeof part.reasoning === 'string') return part.reasoning;
+            if (typeof part.text === 'string') return part.text;
+          }
+          if (t === 'thinking' && typeof part.thinking === 'string') return part.thinking;
+          if (t === 'redacted_thinking') return '[推理内容已脱敏]\n';
+          return '';
+        })
+        .join('');
+      if (fromBlocks.trim()) return fromBlocks;
+    }
+    const ak = chunk.additional_kwargs;
+    if (ak && typeof ak === 'object') {
+      if (typeof (ak as any).reasoning_content === 'string' && (ak as any).reasoning_content) {
+        return String((ak as any).reasoning_content);
+      }
+      const r = (ak as any).reasoning;
+      if (r && typeof r === 'object' && Array.isArray(r.summary)) {
+        const fromSummary = r.summary
+          .map((s: any) => (typeof s?.text === 'string' ? s.text : ''))
+          .join('');
+        if (fromSummary.trim()) return fromSummary;
+      }
+    }
+    return '';
+  }
+
+  /** Agent 工具调用步骤，作为可读的 CoT 补充（与模型原生 reasoning 无关时仍有助于排查） */
+  private formatAgentToolThinkLine(ev: any): string {
+    const name = typeof ev?.name === 'string' ? ev.name.trim() : '';
+    if (!name) return '';
+    const input = ev?.data?.input;
+    let extra = '';
+    try {
+      if (input && typeof input === 'object') {
+        const q = (input as any).question;
+        if (typeof q === 'string' && q.trim()) extra = q.trim().slice(0, 400);
+        else extra = JSON.stringify(input).slice(0, 400);
+      }
+    } catch {
+      /* ignore */
+    }
+    return `\n▸ 工具 ${name}${extra ? `：${extra}` : ''}\n`;
+  }
+
+  /**
    * 混合模式下优先走 aisousuo /api/search/stream（与 AI_SEARCH_SSE_PATH，默认 /search/stream）；
    * 失败或未启用时走同步 /api/search。
    */
-  private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue) {
+  private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue, depth?: AiSearchDepth) {
+    const d = this.getAiSearchDepth(depth);
+    if (d === 'quick') {
+      // 快速模式优先单次请求，减少 SSE 链路与等待时间。
+      return this.aiSearch(query, 'quick');
+    }
     const ssePath = this.getAiSearchSsePath();
     if (ssePath) {
       try {
         const base = this.aiSearchBaseUrl.replace(/\/$/, '');
         const url = `${base}${ssePath}`;
-        const topK = Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES') || 3) || 3;
+        const topK = this.getAiSearchTopK('deep');
         const { data: stream } = await axios.post(
           url,
           { query, top_k_pages: topK },
-          { responseType: 'stream', timeout: 120000 },
+          { responseType: 'stream', timeout: this.getAiSearchTimeoutMs('deep') },
         );
         return await this.consumeAisousuoSearchSse(stream, sideQueue);
       } catch (err: any) {
         this.logger.warn(`AI Search SSE 失败，回退同步 /search: ${err?.message}`);
       }
     }
-    return this.aiSearch(query);
+    return this.aiSearch(query, 'deep');
   }
 
   /** 混合模式写入 system prompt，供模型综合（避免仅靠工具调用时模型跳过外部检索） */
@@ -919,8 +1002,9 @@ export class KnowledgeBaseService {
     sideQueue: KbSideQueue;
     useSandbox?: boolean;
     requestExample?: string;
+    aiSearchDepth?: AiSearchDepth;
   }): AsyncGenerator<KbStreamPayload> {
-    const { sessionId, userId, question, history, usedSearchMode, sideQueue, useSandbox, requestExample } =
+    const { sessionId, userId, question, history, usedSearchMode, sideQueue, useSandbox, requestExample, aiSearchDepth } =
       params;
     const historyChat = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
     const historyForKb = [...historyChat, { role: 'user' as const, content: question }].slice(-10);
@@ -1004,7 +1088,7 @@ export class KnowledgeBaseService {
       sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'done', tool: 'internal_kb_search' });
 
       sideQueue.push({ type: 'status', phase: 'ai_search', detail: 'start', tool: 'external_ai_search' });
-      const extRes = await this.aiSearchWithOptionalSse(retrievalQuery, sideQueue);
+      const extRes = await this.aiSearchWithOptionalSse(retrievalQuery, sideQueue, aiSearchDepth);
       dedupeSource(extRes.sources || []);
       if (Array.isArray(extRes.followUps) && extRes.followUps.length > 0) {
         followUps.splice(0, followUps.length, ...extRes.followUps);
@@ -1095,8 +1179,14 @@ export class KnowledgeBaseService {
           }
           const ev = item.ev;
           if (ev?.event === 'on_chat_model_stream') {
-            const t = this.chunkToLlmText(ev.data?.chunk);
+            const ch = ev.data?.chunk;
+            const think = this.chunkToLlmReasoningDelta(ch);
+            if (think) yield { type: 'llm_think', text: think };
+            const t = this.chunkToLlmText(ch);
             if (t) yield { type: 'token', text: t, source: 'llm' };
+          } else if (ev?.event === 'on_tool_start') {
+            const line = this.formatAgentToolThinkLine(ev);
+            if (line) yield { type: 'llm_think', text: line };
           }
         }
       } catch (e: any) {
@@ -1145,6 +1235,7 @@ export class KnowledgeBaseService {
     customerCode?: string;
     message: string;
     searchMode?: 'internal' | 'hybrid';
+    aiSearchDepth?: AiSearchDepth;
     useSandbox?: boolean;
     requestExample?: string;
   }): AsyncGenerator<KbStreamPayload> {
@@ -1169,6 +1260,7 @@ export class KnowledgeBaseService {
         question: params.message,
         history,
         usedSearchMode,
+        aiSearchDepth: params.aiSearchDepth,
         sideQueue,
         useSandbox: params.useSandbox,
         requestExample: params.requestExample,
@@ -1200,6 +1292,7 @@ export class KnowledgeBaseService {
     question: string;
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
     searchMode: 'internal' | 'hybrid';
+    aiSearchDepth?: AiSearchDepth;
     useSandbox?: boolean;
     requestExample?: string;
   }) {
@@ -1236,7 +1329,7 @@ export class KnowledgeBaseService {
       return '';
     };
 
-    const { sessionId, userId, question, history, searchMode, useSandbox, requestExample } = params;
+    const { sessionId, userId, question, history, searchMode, aiSearchDepth, useSandbox, requestExample } = params;
     const historyForKb = [...history, { role: 'user' as const, content: question }].slice(-10);
     let sandboxLog = '';
     if (useSandbox && requestExample?.trim()) {
@@ -1289,7 +1382,7 @@ export class KnowledgeBaseService {
       dedupeSource(intRes.sources || []);
       let extRes: { answer: string; sources: KBSearchResult[]; followUps: string[]; confidence?: number };
       try {
-        extRes = await this.aiSearchWithOptionalSse(retrievalQuery, noopQ);
+        extRes = await this.aiSearchWithOptionalSse(retrievalQuery, noopQ, aiSearchDepth);
       } finally {
         noopQ.close();
       }
@@ -1438,6 +1531,7 @@ export class KnowledgeBaseService {
     customerCode?: string;
     message: string;
     searchMode?: 'internal' | 'hybrid';
+    aiSearchDepth?: AiSearchDepth;
     useSandbox?: boolean;
     requestExample?: string;
   }) {
@@ -1452,6 +1546,7 @@ export class KnowledgeBaseService {
       question: params.message,
       history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
       searchMode: usedSearchMode,
+      aiSearchDepth: params.aiSearchDepth,
       useSandbox: params.useSandbox,
       requestExample: params.requestExample,
     });
