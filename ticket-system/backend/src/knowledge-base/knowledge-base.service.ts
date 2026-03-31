@@ -697,6 +697,17 @@ export class KnowledgeBaseService {
     let buffer = '';
     let fullLlm = '';
     let resultPayload: any = null;
+    const splitSseBlocks = (input: string): { blocks: string[]; rest: string } => {
+      const blocks: string[] = [];
+      let rest = input;
+      while (true) {
+        const m = rest.match(/\r?\n\r?\n/);
+        if (!m || m.index === undefined) break;
+        blocks.push(rest.slice(0, m.index));
+        rest = rest.slice(m.index + m[0].length);
+      }
+      return { blocks, rest };
+    };
 
     const statusEvents = new Set([
       'cache_hit',
@@ -734,18 +745,14 @@ export class KnowledgeBaseService {
       }
     };
 
-    for await (const chunk of stream as AsyncIterable<Buffer | string>) {
-      buffer += typeof chunk === 'string' ? chunk : chunk.toString();
-      let sep = buffer.indexOf('\n\n');
-      while (sep !== -1) {
-        const block = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
+    const parseBlock = (block: string) => {
+      if (!block.trim()) return;
         let eventName = '';
         const dataLines: string[] = [];
-        for (const line of block.split('\n')) {
+      for (const line of block.split(/\r?\n/)) {
           const l = line.replace(/\r$/, '');
-          if (l.startsWith('event:')) eventName = l.slice(6).trim();
-          else if (l.startsWith('data:')) dataLines.push(l.slice(5).trim());
+        if (l.trimStart().startsWith('event:')) eventName = l.trimStart().slice(6).trim();
+        else if (l.trimStart().startsWith('data:')) dataLines.push(l.trimStart().slice(5).trim());
         }
         const dataRaw = dataLines.join('\n').trim();
         if (dataRaw) {
@@ -767,9 +774,15 @@ export class KnowledgeBaseService {
             }
           }
         }
-        sep = buffer.indexOf('\n\n');
-      }
+    };
+
+    for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+      buffer += typeof chunk === 'string' ? chunk : chunk.toString();
+      const { blocks, rest } = splitSseBlocks(buffer);
+      buffer = rest;
+      for (const block of blocks) parseBlock(block);
     }
+    if (buffer.trim()) parseBlock(buffer);
 
     const mapped = resultPayload
       ? this.mapAisousuoSearchResponse(resultPayload)
