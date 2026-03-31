@@ -15,12 +15,71 @@ export class StatusMonitorService {
     private prisma: PrismaService,
   ) {}
 
+  private normalizeUptimeData(configRes: any, heartbeatRes: any) {
+    const cfg = configRes || {};
+    const hb = heartbeatRes || {};
+    const monitorList: any[] =
+      Array.isArray(cfg?.publicGroupList)
+        ? cfg.publicGroupList.flatMap((g: any) => (Array.isArray(g?.monitorList) ? g.monitorList : []))
+        : [];
+    const heartbeatList = hb?.heartbeatList || {};
+    const uptimeList = hb?.uptimeList || {};
+
+    const services = monitorList.map((m: any) => {
+      const id = String(m.id);
+      const rows: any[] = Array.isArray(heartbeatList[id]) ? heartbeatList[id] : [];
+      const recent = rows.slice(-120);
+      const current = recent.length > 0 ? recent[recent.length - 1] : null;
+      const up24 = typeof uptimeList[`${id}_24`] === 'number' ? Number(uptimeList[`${id}_24`]) : undefined;
+      const uptimePercent = up24 !== undefined ? Number((up24 * 100).toFixed(2)) : null;
+      const bars = recent.slice(-90).map((r: any) => ({
+        status: Number(r?.status || 0),
+        time: r?.time || '',
+      }));
+      return {
+        id: m.id,
+        name: m.name || `Monitor-${id}`,
+        type: m.type || '',
+        currentStatus: Number(current?.status || 0),
+        currentPing: current?.ping ?? null,
+        uptimePercent,
+        bars,
+      };
+    });
+
+    const allUp = services.length > 0 && services.every((s: any) => s.currentStatus === 1);
+    return {
+      status: allUp ? 'healthy' : 'degraded',
+      title: cfg?.config?.title || 'api',
+      serviceCount: services.length,
+      healthyCount: services.filter((s: any) => s.currentStatus === 1).length,
+      message: allUp ? '所有服务运行正常' : '部分服务异常',
+      services,
+    };
+  }
+
+  private async fetchUptimeStatusByPage(url: string) {
+    const u = new URL(url);
+    const m = u.pathname.match(/\/status\/([^/]+)/i);
+    const slug = m?.[1] || 'api';
+    const base = `${u.protocol}//${u.host}`;
+    const key = (this.config.get<string>('UPTIME_KUMA_API_KEY') || '').trim();
+    const headers: Record<string, string> = key
+      ? { Authorization: `Bearer ${key}`, 'api-key': key }
+      : {};
+    const [cfgRes, hbRes] = await Promise.all([
+      axios.get(`${base}/api/status-page/${slug}`, { timeout: 8000, headers }),
+      axios.get(`${base}/api/status-page/heartbeat/${slug}`, { timeout: 8000, headers }),
+    ]);
+    return this.normalizeUptimeData(cfgRes.data, hbRes.data);
+  }
+
   @Cron(CronExpression.EVERY_5_MINUTES)
   async fetchExternalStatus() {
     const url = this.config.get<string>('EXTERNAL_STATUS_API_URL') || 'http://20.191.156.160/status/api';
     try {
-      const response = await axios.get(url, { timeout: 5000 });
-      this.cachedStatus = response.data;
+      // Uptime Kuma status-page: use dedicated JSON API to get monitor rows + uptime.
+      this.cachedStatus = await this.fetchUptimeStatusByPage(url);
       this.lastFetchAt = new Date();
     } catch (err) {
       this.logger.warn(`外部状态 API 不可达: ${err.message}`);

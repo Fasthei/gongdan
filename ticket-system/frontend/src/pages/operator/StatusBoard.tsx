@@ -74,30 +74,78 @@ export default function StatusBoard() {
             </Row>
 
             <Card title="外部平台服务状态">
-              <Descriptions bordered column={1} size="small">
-                <Descriptions.Item label="平台接口">
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8, padding: '10px 12px' }}>
+                  <Text strong style={{ color: '#237804' }}>
+                    {status.external?.data?.message || '所有服务运行正常'}
+                  </Text>
+                </div>
+                <div>
                   <a href="http://20.191.156.160/status/api" target="_blank" rel="noreferrer">
-                    http://20.191.156.160/status/api
+                    打开原始状态页
                   </a>
-                </Descriptions.Item>
-                <Descriptions.Item label="状态">
-                  {status.external?.data?.status === 'ok' || status.external?.data?.status === 'healthy'
-                    ? <Tag color="success">正常</Tag>
-                    : status.external?.data?.status === 'unknown'
-                    ? <Tag color="default">未知</Tag>
-                    : <Tag color="error">异常</Tag>
-                  }
-                </Descriptions.Item>
-                {status.external?.data?.message && (
-                  <Descriptions.Item label="说明">{status.external.data.message}</Descriptions.Item>
-                )}
-                <Descriptions.Item label="最后更新">
-                  {status.external?.lastFetchAt ? dayjs(status.external.lastFetchAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
-                </Descriptions.Item>
-                <Descriptions.Item label="数据是否过期">
-                  {status.external?.isStale ? <Tag color="warning">已过期</Tag> : <Tag color="success">最新</Tag>}
-                </Descriptions.Item>
-              </Descriptions>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {(status.external?.data?.services || []).map((s: any) => (
+                    <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span
+                        style={{
+                          minWidth: 68,
+                          textAlign: 'center',
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: s.currentStatus === 1 ? '#1f7a1f' : '#a8071a',
+                          background: s.currentStatus === 1 ? '#f6ffed' : '#fff1f0',
+                          border: `1px solid ${s.currentStatus === 1 ? '#b7eb8f' : '#ffa39e'}`,
+                          borderRadius: 999,
+                          padding: '2px 8px',
+                          lineHeight: '16px',
+                          display: 'inline-block',
+                        }}
+                      >
+                        {typeof s.uptimePercent === 'number' ? `${s.uptimePercent}%` : '--'}
+                      </span>
+                      <div style={{ width: 120 }}>
+                        <Text>{s.name}</Text>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>1h</Text>
+                          <Text type="secondary" style={{ fontSize: 11 }}>现在</Text>
+                        </div>
+                        <div style={{ display: 'flex', gap: 2, overflow: 'hidden' }}>
+                          {(s.bars || []).slice(-90).map((b: any, idx: number) => {
+                            const isDown = b.status !== 1;
+                            return (
+                              <span
+                                key={`${s.id}-${idx}`}
+                                style={{
+                                  display: 'inline-block',
+                                  width: 4,
+                                  height: isDown ? 18 : 14,
+                                  marginTop: isDown ? -2 : 0,
+                                  borderRadius: 2,
+                                  background: isDown ? '#ff4d4f' : '#52c41a',
+                                  boxShadow: isDown ? '0 0 0 1px #ffccc7, 0 0 6px rgba(255,77,79,0.5)' : 'none',
+                                }}
+                                title={`${b.time || ''} ${b.status === 1 ? 'up' : 'down'}`}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Descriptions bordered column={1} size="small">
+                  <Descriptions.Item label="最后更新">
+                    {status.external?.lastFetchAt ? dayjs(status.external.lastFetchAt).format('YYYY-MM-DD HH:mm:ss') : '-'}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="数据是否过期">
+                    {status.external?.isStale ? <Tag color="warning">已过期</Tag> : <Tag color="success">最新</Tag>}
+                  </Descriptions.Item>
+                </Descriptions>
+              </Space>
             </Card>
 
             <Card title="工程师在线与处理明细">
