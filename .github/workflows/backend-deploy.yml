@@ -25,8 +25,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: ticket-system/backend/package-lock.json
 
-      - run: npm install
+      - name: Install dependencies with retry
+        run: |
+          npm config set fetch-retries 5
+          npm config set fetch-retry-factor 2
+          npm config set fetch-retry-maxtimeout 120000
+          npm config set fetch-retry-mintimeout 20000
+          for i in 1 2 3; do
+            npm ci && break
+            if [ "$i" -eq 3 ]; then
+              echo "npm ci failed after 3 attempts"
+              exit 1
+            fi
+            echo "npm ci failed (attempt $i), retrying in 15s..."
+            sleep 15
+          done
       - run: npx prisma generate
       - run: npm run build
 
