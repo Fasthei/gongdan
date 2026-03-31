@@ -4,7 +4,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import { PrismaService } from '../prisma/prisma.service';
 import { randomUUID } from 'crypto';
-import { ChatOpenAI } from '@langchain/openai';
+import { AzureChatOpenAI } from '@langchain/openai';
 import { AIMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import { createAgent, tool } from 'langchain';
@@ -47,10 +47,11 @@ export class KnowledgeBaseService {
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly aiSearchBaseUrl: string;
-  private readonly llmBaseUrl: string;
-  private readonly llmApiKey: string;
   private readonly llmPrimaryModel: string;
-  private readonly llmFallbackModel: string;
+  private readonly azureOpenAIEndpoint: string;
+  private readonly azureOpenAIApiVersion: string;
+  private readonly azureOpenAIDeployment: string;
+  private readonly azureOpenAIApiKey: string;
   private readonly learnMcpUrl: string;
   private readonly learnMcpEnabled: boolean;
   private readonly learnMcpToolName: string;
@@ -67,10 +68,11 @@ export class KnowledgeBaseService {
     this.aiSearchBaseUrl =
       this.config.get<string>('AI_SEARCH_AGENT_URL') ||
       'https://aisousuogongdan-gehqaceacuf2cade.eastasia-01.azurewebsites.net';
-    this.llmBaseUrl = this.config.get<string>('LLM_BASE_URL') || 'https://api.taijiaicloud.com/v1';
-    this.llmApiKey = this.config.get<string>('LLM_API_KEY') || '';
-    this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'claude-sonnet-4-6';
-    this.llmFallbackModel = this.config.get<string>('LLM_FALLBACK_MODEL') || 'gemini-3.1-flash-lite-preview';
+    this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'gpt-5.4';
+    this.azureOpenAIEndpoint = this.config.get<string>('AZURE_OPENAI_ENDPOINT') || '';
+    this.azureOpenAIApiVersion = this.config.get<string>('AZURE_OPENAI_API_VERSION') || '';
+    this.azureOpenAIDeployment = this.config.get<string>('AZURE_OPENAI_API_DEPLOYMENT_NAME') || '';
+    this.azureOpenAIApiKey = this.config.get<string>('AZURE_OPENAI_API_KEY') || '';
     this.learnMcpUrl = this.config.get<string>('LEARN_MCP_URL') || 'https://learn.microsoft.com/api/mcp';
     this.learnMcpEnabled = (this.config.get<string>('LEARN_MCP_ENABLED') || 'true').toLowerCase() !== 'false';
     this.learnMcpToolName = (this.config.get<string>('LEARN_MCP_TOOL_NAME') || '').trim();
@@ -81,6 +83,62 @@ export class KnowledgeBaseService {
       'api-key': this.apiKey,
       'Content-Type': 'application/json',
     };
+  }
+
+  /** 展开嵌套 Error / axios 信息，便于判断 429、上下文过长等 */
+  private flattenErrorText(err: any): string {
+    const parts: string[] = [];
+    let e: any = err;
+    for (let depth = 0; e && depth < 6; depth++) {
+      if (typeof e?.message === 'string' && e.message) parts.push(e.message);
+      const status = e?.response?.status ?? e?.status;
+      if (status != null) parts.push(`http_status=${status}`);
+      const d = e?.response?.data;
+      if (typeof d === 'string' && d.trim()) parts.push(d.slice(0, 2000));
+      else if (d && typeof d === 'object') {
+        try {
+          parts.push(JSON.stringify(d).slice(0, 2000));
+        } catch {
+          /* ignore */
+        }
+      }
+      e = e?.cause;
+    }
+    return parts.join(' | ');
+  }
+
+  /** 与 Azure/LangChain 常见的限流、TPM、上下文过长提示对齐（兼容 err.cause 链） */
+  private isRateLimitOrPromptTooLargeError(err: any): boolean {
+    const t = this.flattenErrorText(err).toLowerCase();
+    return (
+      /\b429\b/.test(t) ||
+      /rate.?limit|too many requests|throttl/i.test(t) ||
+      /too many tokens|token.?limit|tpm|tokens per min|maximum context|context.?length|maximum.?length|reduce the length/i.test(t)
+    );
+  }
+
+  /** 多轮对话时截断单条消息，避免第二轮起把超长助手回复再次完整喂给主模型导致 TPM/上下文爆炸 */
+  private shrinkDialogueForAgent(
+    turns: Array<{ role: 'user' | 'assistant'; content: string }>,
+    maxTurns = 8,
+    maxCharsPerMessage = 3600,
+  ): Array<{ role: 'user' | 'assistant'; content: string }> {
+    return turns.slice(-maxTurns).map((x) => {
+      const c = x.content || '';
+      if (c.length <= maxCharsPerMessage) return { role: x.role, content: c };
+      return {
+        role: x.role,
+        content: `${c.slice(0, maxCharsPerMessage)}\n…\n[本条消息过长，已截断以保障多轮对话可用]`,
+      };
+    });
+  }
+
+  private getSmartQueryTimeoutMs(): number {
+    return Math.min(Math.max(Number(this.config.get<string>('KB_AGENT_SMART_QUERY_TIMEOUT_MS') || 30000) || 30000, 5000), 120000);
+  }
+
+  private getLlmTimeoutMs(): number {
+    return Math.min(Math.max(Number(this.config.get<string>('LLM_TIMEOUT_MS') || 180000) || 180000, 15000), 600000);
   }
 
   private parseFirstJsonObject(raw: string): any | null {
@@ -115,9 +173,9 @@ export class KnowledgeBaseService {
    */
   private async inferDocIntentSubagent(prompt: string): Promise<DocIntent> {
     const fallback = this.inferDocIntentHeuristic(prompt);
-    if (!this.llmApiKey?.trim()) return fallback;
+    if (!this.azureOpenAIApiKey?.trim()) return fallback;
     try {
-      const llm = this.createAgentModel(this.llmFallbackModel);
+      const llm = this.createAgentModel(this.llmPrimaryModel);
       const resp: any = await llm.invoke([
         {
           role: 'system',
@@ -279,7 +337,7 @@ export class KnowledgeBaseService {
       const { data } = await axios.post(
         `${this.baseUrl}/api/v1/smart-query`,
         { question, top: topK, history: history || [] },
-        { headers: this.headers, timeout: 10000 },
+        { headers: this.headers, timeout: this.getSmartQueryTimeoutMs() },
       );
 
       const sources: KBSearchResult[] = (data.sources || data.results || []).map((item: any, i: number) =>
@@ -834,14 +892,26 @@ export class KnowledgeBaseService {
   }
 
   private createAgentModel(modelName: string, streaming = false) {
-    return new ChatOpenAI({
+    if (!this.azureOpenAIEndpoint?.trim()) {
+      throw new Error('缺少 AZURE_OPENAI_ENDPOINT（标准 Azure OpenAI 必填）');
+    }
+    if (!this.azureOpenAIApiVersion?.trim()) {
+      throw new Error('缺少 AZURE_OPENAI_API_VERSION（标准 Azure OpenAI 必填）');
+    }
+    if (!this.azureOpenAIDeployment?.trim()) {
+      throw new Error('缺少 AZURE_OPENAI_API_DEPLOYMENT_NAME（标准 Azure OpenAI 必填）');
+    }
+    if (!this.azureOpenAIApiKey?.trim()) {
+      throw new Error('缺少 AZURE_OPENAI_API_KEY（标准 Azure OpenAI 必填）');
+    }
+    return new AzureChatOpenAI({
+      azureOpenAIEndpoint: this.azureOpenAIEndpoint,
+      azureOpenAIApiKey: this.azureOpenAIApiKey,
+      azureOpenAIApiVersion: this.azureOpenAIApiVersion,
+      azureOpenAIApiDeploymentName: this.azureOpenAIDeployment,
       model: modelName,
-      apiKey: this.llmApiKey,
-      configuration: {
-        baseURL: this.llmBaseUrl,
-      },
       temperature: 0.2,
-      timeout: 15000,
+      timeout: this.getLlmTimeoutMs(),
       maxRetries: 0,
       streaming,
     });
@@ -1274,8 +1344,9 @@ export class KnowledgeBaseService {
   }): AsyncGenerator<KbStreamPayload> {
     const { sessionId, userId, question, history, usedSearchMode, sideQueue, useSandbox, requestExample, aiSearchDepth, docContext, docName } =
       params;
-    const historyChat = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
-    const historyForKb = [...historyChat, { role: 'user' as const, content: question }].slice(-10);
+    const historyRaw = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
+    const historyChat = this.shrinkDialogueForAgent(historyRaw);
+    const historyForKb = [...this.shrinkDialogueForAgent(historyRaw), { role: 'user' as const, content: question }].slice(-10);
 
     let sandboxLog = '';
     if (useSandbox && requestExample?.trim()) {
@@ -1483,25 +1554,23 @@ export class KnowledgeBaseService {
     try {
       yield* runOneModel.call(this, this.llmPrimaryModel, sideQueue);
     } catch (err: any) {
-      const msg = String(err?.message || '');
-      this.logger.warn(`主模型流式调用失败: ${msg}`);
-      if (msg.includes('429') || msg.includes('RATE_LIMIT')) {
-        const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
-        dedupeSource(degraded.sources || []);
+      const detail = this.flattenErrorText(err);
+      this.logger.warn(`主模型流式调用失败: ${detail.slice(0, 1500)}`);
+      const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
+      dedupeSource(degraded.sources || []);
+      if (this.isRateLimitOrPromptTooLargeError(err)) {
         const text =
           degraded.answer ||
-          '当前模型限流，已为你切换为内部知识库直答，请稍后再试 AI 增强模式。';
+          '当前模型触发限流或上下文体量过大（多轮长对话易发）。已改为仅依据内部知识库与本轮检索要点回复；你可新建会话或拆成更短问题再试。';
         yield { type: 'token', text, source: 'llm' };
       } else {
-        const q2 = new KbSideQueue();
-        try {
-          yield* runOneModel.call(this, this.llmFallbackModel, q2);
-        } catch (err2: any) {
-          this.logger.error(`回退模型流式失败: ${err2?.message}`, err2?.stack);
-          const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
-          dedupeSource(degraded.sources || []);
-          yield { type: 'token', text: degraded.answer || '暂时无法生成回答，请稍后重试。', source: 'llm' };
-        }
+        yield {
+          type: 'token',
+          text:
+            degraded.answer ||
+            `主模型暂时不可用（${detail.slice(0, 280) || '未知错误'}）。已尽量用内部知识库作答；请稍后重试或缩短对话上下文。`,
+          source: 'llm',
+        };
       }
     }
 
@@ -1621,7 +1690,9 @@ export class KnowledgeBaseService {
     };
 
     const { sessionId, userId, question, history, searchMode, aiSearchDepth, useSandbox, requestExample, docContext, docName } = params;
-    const historyForKb = [...history, { role: 'user' as const, content: question }].slice(-10);
+    const historyRaw = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
+    const historySlim = this.shrinkDialogueForAgent(historyRaw);
+    const historyForKb = [...historySlim, { role: 'user' as const, content: question }].slice(-10);
     let sandboxLog = '';
     if (useSandbox && requestExample?.trim()) {
       const runStartedAt = new Date();
@@ -1777,7 +1848,9 @@ export class KnowledgeBaseService {
             {
               role: 'user',
               content: [
-                `历史对话（最近10轮）:\n${history.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'}`,
+                `历史对话（最近若干轮，已截断过长消息）:\n${
+                  historySlim.map((h) => `${h.role}: ${h.content}`).join('\n') || '无'
+                }`,
                 `\n用户问题:\n${question}`,
                 useSandbox && (requestExample?.trim() || sandboxLog)
                   ? `\n\n---\n【客户请求示例】\n${(requestExample || '').trim() || '（无）'}\n\n【沙盒复现输出】\n${sandboxLog || '（无）'}\n`
@@ -1798,29 +1871,22 @@ export class KnowledgeBaseService {
       const res = await invokeAgentWithModel(this.llmPrimaryModel);
       output = extractAgentAnswerText(res);
     } catch (err: any) {
-      this.logger.warn(`主模型调用失败，准备回退模型: ${err.message}`);
-      const primaryErr = String(err?.message || '');
-      if (primaryErr.includes('429') || primaryErr.includes('RATE_LIMIT')) {
-        const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
-        dedupeSource(degraded.sources || []);
+      const detail = this.flattenErrorText(err);
+      this.logger.warn(`主模型调用失败: ${detail.slice(0, 1500)}`);
+      const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
+      dedupeSource(degraded.sources || []);
+      if (this.isRateLimitOrPromptTooLargeError(err)) {
         output = degraded.answer || '';
         return {
-          answer: output || '当前模型限流，已为你切换为内部知识库直答，请稍后再试 AI 增强模式。',
+          answer:
+            output ||
+            '当前模型触发限流或上下文体量过大（多轮长对话易发）。已改为依据内部知识库与本轮检索要点回复；建议新建会话或缩短问题。',
           sources: sourceBucket.slice(0, 10),
           followUps,
           confidence,
         };
       }
-      try {
-        const res = await invokeAgentWithModel(this.llmFallbackModel);
-        output = extractAgentAnswerText(res);
-      } catch (err2: any) {
-        this.logger.error(`回退模型调用失败: ${err2?.message}`, err2?.stack);
-        // 主备模型都失败时不要中断接口，降级为内部知识库直答，避免前端再次提问直接报错。
-        const degraded = await this.smartQuery(retrievalQuery, 5, historyForKb);
-        dedupeSource(degraded.sources || []);
-        output = degraded.answer || '';
-      }
+      output = degraded.answer || '';
     }
 
     return {
