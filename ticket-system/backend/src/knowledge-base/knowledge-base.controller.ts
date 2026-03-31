@@ -96,6 +96,8 @@ export class KnowledgeBaseController {
     @Body()     body: {
       sessionId?: string;
       message: string;
+      docContext?: string;
+      docName?: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
       aiSearchDepth?: 'quick' | 'deep';
@@ -125,6 +127,8 @@ export class KnowledgeBaseController {
       userRole: req.user.role,
       customerCode: body.customerCode,
       message: body.message.trim(),
+      docContext: body.docContext?.trim(),
+      docName: body.docName?.trim(),
       searchMode: body.searchMode,
       aiSearchDepth: body.aiSearchDepth,
       useSandbox: body.useSandbox,
@@ -140,6 +144,8 @@ export class KnowledgeBaseController {
     body: {
       sessionId?: string;
       message: string;
+      docContext?: string;
+      docName?: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
       aiSearchDepth?: 'quick' | 'deep';
@@ -186,6 +192,8 @@ export class KnowledgeBaseController {
         userRole: req.user.role,
         customerCode: body.customerCode,
         message: body.message.trim(),
+        docContext: body.docContext?.trim(),
+        docName: body.docName?.trim(),
         searchMode: body.searchMode,
         aiSearchDepth: body.aiSearchDepth,
         useSandbox: body.useSandbox,

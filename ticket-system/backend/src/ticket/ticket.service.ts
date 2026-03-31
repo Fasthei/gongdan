@@ -124,10 +124,11 @@ export class TicketService {
 
     if (user.role === 'CUSTOMER') {
       where.customerId = user.customerId;
-    } else if (user.role === 'ENGINEER') {
-      where.assignedEngineerId = user.id;
+    } else if (user.role === 'OPERATOR') {
+      // 运营仅可查看其创建的客户名下工单（customer.createdBy = operatorId）。
+      where.customer = { createdBy: user.id };
     }
-    // OPERATOR / ADMIN 看全部
+    // ENGINEER / ADMIN 看全部
 
     const [tickets, total] = await Promise.all([
       this.prisma.ticket.findMany({
@@ -150,7 +151,7 @@ export class TicketService {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       include: {
-        customer: { select: { name: true, tier: true, customerCode: true } },
+        customer: { select: { name: true, tier: true, customerCode: true, createdBy: true } },
         assignedEngineer: { select: { username: true, level: true, email: true } },
         urges: { orderBy: { urgedAt: 'desc' } },
       },
@@ -160,7 +161,7 @@ export class TicketService {
     if (user.role === 'CUSTOMER' && ticket.customerId !== user.customerId) {
       throw new ForbiddenException('无权查看此工单');
     }
-    if (user.role === 'ENGINEER' && ticket.assignedEngineerId !== user.id) {
+    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
       throw new ForbiddenException('无权查看此工单');
     }
 

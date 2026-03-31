@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload, Segmented, Select } from 'antd';
+import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload, Segmented, Select, Tooltip } from 'antd';
 import type { UploadFile } from 'antd/es/upload/interface';
 import {
   RobotOutlined,
@@ -12,6 +12,7 @@ import {
   CodeOutlined,
   CopyOutlined,
   UploadOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -78,6 +79,10 @@ export default function KnowledgeBaseChat() {
   const [exampleModalOpen, setExampleModalOpen] = useState(false);
   const [requestExampleText, setRequestExampleText] = useState('');
   const [exampleFileList, setExampleFileList] = useState<UploadFile[]>([]);
+  const [docModalOpen, setDocModalOpen] = useState(false);
+  const [docFileList, setDocFileList] = useState<UploadFile[]>([]);
+  const [docContextText, setDocContextText] = useState('');
+  const [docContextName, setDocContextName] = useState('');
   const [sandboxStatus, setSandboxStatus] = useState('');
   const [retrievalStatus, setRetrievalStatus] = useState('');
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -88,7 +93,8 @@ export default function KnowledgeBaseChat() {
   const [llmThinkText, setLlmThinkText] = useState('');
   const [thinkHistory, setThinkHistory] = useState<ThinkRound[]>([]);
   const [ticketOptions, setTicketOptions] = useState<Array<{ label: string; value: string }>>([]);
-  const [selectedTicketId, setSelectedTicketId] = useState('');
+  const [selectedTicketIds, setSelectedTicketIds] = useState<string[]>([]);
+  const [selectedTickets, setSelectedTickets] = useState<any[]>([]);
   const [ticketLoading, setTicketLoading] = useState(false);
   const llmThinkRef = useRef('');
 
@@ -132,50 +138,52 @@ export default function KnowledgeBaseChat() {
       .catch(() => {});
 
     // 右侧工单明细选择器：拉取可选工单列表（按当前用户权限返回）
-    api.get('/tickets', { params: { page: 1, pageSize: 100 } })
-      .then(({ data }) => {
-        const list = Array.isArray(data?.tickets) ? data.tickets : [];
-        setTicketOptions(
-          list.map((t: any) => ({
-            value: t.id,
-            label: `${t.ticketNumber || t.id} · ${t.status || ''}`,
-          })),
-        );
-      })
-      .catch(() => {});
-  }, [sessionId]);
-
-  const injectTicketToQuestion = async () => {
-    if (!selectedTicketId) return message.warning('请先选择工单');
-    setTicketLoading(true);
-    try {
-      const { data } = await api.get(`/tickets/${selectedTicketId}`);
-      const t = data?.ticket || data;
-      if (!t) throw new Error('工单不存在');
-      const detail = [
-        `工单编号: ${t.ticketNumber || t.id || ''}`,
-        `状态: ${t.status || ''}`,
-        `平台: ${t.platform || ''}`,
-        `模型: ${t.modelUsed || ''}`,
-        t.framework ? `框架/应用: ${t.framework}` : '',
-        t.networkEnv ? `网络环境: ${t.networkEnv}` : '',
-        t.accountInfo ? `账号信息: ${t.accountInfo}` : '',
-        `问题描述:\n${t.description || ''}`,
-        t.requestExample ? `请求示例:\n${t.requestExample}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-      const prefixed = `请基于以下工单信息协助排查并给出解决建议：\n\n${detail}`;
-      setQuestion((prev) => (prev?.trim() ? `${prev}\n\n---\n${prefixed}` : prefixed));
-      if (sandboxMode && t.requestExample && !requestExampleText.trim()) {
-        setRequestExampleText(String(t.requestExample));
-      }
-      message.success('工单明细已加载到输入框');
-    } catch (e: any) {
-      message.error(e?.message || '加载工单明细失败');
-    } finally {
-      setTicketLoading(false);
+    if (!isCustomer) {
+      api.get('/tickets', { params: { page: 1, pageSize: 100 } })
+        .then(({ data }) => {
+          const list = Array.isArray(data?.tickets) ? data.tickets : [];
+          setTicketOptions(
+            list.map((t: any) => ({
+              value: t.id,
+              label: `${t.ticketNumber || t.id} · ${t.status || ''}`,
+            })),
+          );
+        })
+        .catch(() => {});
+    } else {
+      setTicketOptions([]);
+      setSelectedTicketIds([]);
+      setSelectedTickets([]);
     }
+  }, [sessionId, isCustomer]);
+
+  const buildTicketContext = (tickets: any[]): string => {
+    if (!tickets.length) return '';
+    return tickets
+      .map((t, idx) =>
+        [
+          `### 工单 ${idx + 1}`,
+          `工单编号: ${t.ticketNumber || t.id || ''}`,
+          `状态: ${t.status || ''}`,
+          `平台: ${t.platform || ''}`,
+          `模型: ${t.modelUsed || ''}`,
+          t.framework ? `框架/应用: ${t.framework}` : '',
+          t.networkEnv ? `网络环境: ${t.networkEnv}` : '',
+          t.accountInfo ? `账号信息: ${t.accountInfo}` : '',
+          `问题描述:\n${t.description || ''}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      )
+      .join('\n\n');
+  };
+
+  const buildSandboxRequestFromTickets = (tickets: any[]): string => {
+    const samples = tickets
+      .map((t) => (typeof t?.requestExample === 'string' ? t.requestExample.trim() : ''))
+      .filter(Boolean);
+    if (!samples.length) return '';
+    return samples.join('\n\n# ---- 来自其他工单请求示例 ----\n\n');
   };
 
   useEffect(() => {
@@ -247,17 +255,27 @@ export default function KnowledgeBaseChat() {
     };
 
     try {
+      const ticketContext = buildTicketContext(selectedTickets);
+      const mergedMessage = ticketContext
+        ? `${userMsg.content}\n\n---\n【关联工单明细】\n${ticketContext}`
+        : userMsg.content;
+      const ticketSandboxRequest = buildSandboxRequestFromTickets(selectedTickets);
+      const finalRequestExample = requestExampleText.trim() || (sandboxMode ? ticketSandboxRequest : '');
+      const finalDocContext = docContextText.trim();
+      const finalDocName = docContextName.trim();
+
       const res = await fetchWithAuthStream(apiUrl('/api/knowledge-base/chat/stream'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: sessionId || undefined,
-          message: userMsg.content,
+          message: mergedMessage,
           searchMode,
           ...(searchMode === 'hybrid' ? { aiSearchDepth } : {}),
-          ...(sandboxMode && requestExampleText.trim()
-            ? { useSandbox: true, requestExample: requestExampleText.trim() }
+          ...(sandboxMode && finalRequestExample
+            ? { useSandbox: true, requestExample: finalRequestExample }
             : {}),
+          ...(finalDocContext ? { docContext: finalDocContext, docName: finalDocName || undefined } : {}),
           ...(isCustomer ? { customerCode: verifiedCode } : {}),
         }),
       });
@@ -768,24 +786,86 @@ export default function KnowledgeBaseChat() {
                   </div>
                 )}
 
-                <div style={{ marginBottom: 24 }}>
-                  <Text strong style={{ display: 'block', marginBottom: 12 }}>工单明细</Text>
-                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                    <Select
-                      showSearch
-                      allowClear
-                      placeholder="选择工单后可注入对话"
-                      optionFilterProp="label"
-                      value={selectedTicketId || undefined}
-                      options={ticketOptions}
-                      onChange={(v) => setSelectedTicketId(v || '')}
-                      style={{ width: '100%' }}
-                    />
-                    <Button size="small" onClick={() => void injectTicketToQuestion()} loading={ticketLoading} disabled={!selectedTicketId}>
-                      加载到对话输入框
-                    </Button>
-                  </Space>
-                </div>
+                {!isCustomer ? (
+                  <div style={{ marginBottom: 24 }}>
+                    <Space size={6} align="center" style={{ marginBottom: 12 }}>
+                      <Text strong style={{ marginBottom: 0 }}>工单明细</Text>
+                      <Tooltip
+                        title="提示：开启“沙盒”后，系统会默认将所选工单中的请求示例自动带入沙盒执行（若你未手动填写请求示例）。"
+                        placement="topRight"
+                      >
+                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: 14 }} />
+                      </Tooltip>
+                    </Space>
+                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      <Select
+                        showSearch
+                        mode="multiple"
+                        allowClear
+                        placeholder="可选择多个工单作为对话上下文"
+                        optionFilterProp="label"
+                        value={selectedTicketIds}
+                        options={ticketOptions}
+                        onChange={async (v) => {
+                          const ids = Array.isArray(v) ? v.filter(Boolean) : [];
+                          setSelectedTicketIds(ids);
+                          if (ids.length === 0) {
+                            setSelectedTickets([]);
+                            return;
+                          }
+                          setTicketLoading(true);
+                          try {
+                            const rows = await Promise.all(
+                              ids.map(async (id) => {
+                                const { data } = await api.get(`/tickets/${id}`);
+                                return data?.ticket || data;
+                              }),
+                            );
+                            setSelectedTickets(rows.filter(Boolean));
+                          } catch {
+                            message.error('加载工单明细失败');
+                          } finally {
+                            setTicketLoading(false);
+                          }
+                        }}
+                        style={{ width: '100%' }}
+                      />
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        已选择 {selectedTicketIds.length} 个工单；发送消息时将自动作为上下文参与分析。
+                      </Text>
+                      {ticketLoading ? <Spin size="small" /> : null}
+                      {selectedTickets.length > 0 ? (
+                        <details style={{ marginTop: 4 }}>
+                          <summary style={{ cursor: 'pointer', color: '#5f6368', fontSize: 12 }}>
+                            预览将带入的多工单上下文摘要
+                          </summary>
+                          <div style={{ marginTop: 8, maxHeight: 240, overflow: 'auto', background: '#fafafa', borderRadius: 8, padding: 10 }}>
+                            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                              {selectedTickets.map((t: any, idx: number) => (
+                                <div key={t?.id || `${idx}`} style={{ background: '#fff', borderRadius: 6, padding: '8px 10px' }}>
+                                  <Text strong style={{ fontSize: 12 }}>
+                                    {idx + 1}. {t?.ticketNumber || t?.id || '未知工单'}
+                                  </Text>
+                                  <div style={{ marginTop: 4 }}>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                      状态: {t?.status || '-'} · 平台: {t?.platform || '-'} · 模型: {t?.modelUsed || '-'}
+                                    </Text>
+                                  </div>
+                                  <div style={{ marginTop: 4 }}>
+                                    <Text style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                      {(t?.description || '').slice(0, 180) || '（无问题描述）'}
+                                      {(t?.description || '').length > 180 ? '…' : ''}
+                                    </Text>
+                                  </div>
+                                </div>
+                              ))}
+                            </Space>
+                          </div>
+                        </details>
+                      ) : null}
+                    </Space>
+                  </div>
+                ) : null}
 
                 {followUps.length > 0 && (
                   <div>
@@ -854,19 +934,38 @@ export default function KnowledgeBaseChat() {
                     AI 搜索
                   </Button>
                   {searchMode === 'hybrid' ? (
-                    <Segmented
-                      size="small"
-                      options={[
-                        { label: '快速搜索', value: 'quick' },
-                        { label: '深度搜索', value: 'deep' },
-                      ]}
-                      value={aiSearchDepth}
-                      onChange={(v) => {
-                        const next = v === 'quick' ? 'quick' : 'deep';
-                        setAiSearchDepth(next);
-                        localStorage.setItem('kb-ai-search-depth', next);
-                      }}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Button
+                        size="small"
+                        type={aiSearchDepth === 'quick' ? 'primary' : 'default'}
+                        onClick={() => {
+                          setAiSearchDepth('quick');
+                          localStorage.setItem('kb-ai-search-depth', 'quick');
+                        }}
+                        style={{
+                          borderRadius: 999,
+                          border: aiSearchDepth === 'quick' ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                          boxShadow: aiSearchDepth === 'quick' ? '0 0 0 1px rgba(22,119,255,0.2)' : 'none',
+                        }}
+                      >
+                        快速搜索
+                      </Button>
+                      <Button
+                        size="small"
+                        type={aiSearchDepth === 'deep' ? 'primary' : 'default'}
+                        onClick={() => {
+                          setAiSearchDepth('deep');
+                          localStorage.setItem('kb-ai-search-depth', 'deep');
+                        }}
+                        style={{
+                          borderRadius: 999,
+                          border: aiSearchDepth === 'deep' ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                          boxShadow: aiSearchDepth === 'deep' ? '0 0 0 1px rgba(22,119,255,0.2)' : 'none',
+                        }}
+                      >
+                        深度搜索
+                      </Button>
+                    </div>
                   ) : null}
                   <Button
                     shape="round"
@@ -889,6 +988,13 @@ export default function KnowledgeBaseChat() {
                     }}
                   >
                     沙盒
+                  </Button>
+                  <Button
+                    shape="round"
+                    size="small"
+                    onClick={() => setDocModalOpen(true)}
+                  >
+                    文档
                   </Button>
                   <Button
                     shape="round"
@@ -919,6 +1025,60 @@ export default function KnowledgeBaseChat() {
           </div>
         </div>
       )}
+
+      <Modal
+        title="临时文档上下文（仅本轮，不入历史）"
+        open={docModalOpen}
+        onCancel={() => setDocModalOpen(false)}
+        footer={[
+          <Button key="clear" onClick={() => { setDocContextText(''); setDocContextName(''); setDocFileList([]); }}>
+            清空
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setDocModalOpen(false)}>
+            保存并关闭
+          </Button>,
+        ]}
+        width={760}
+        destroyOnClose={false}
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Upload
+            accept=".txt,.md,.markdown,.json,.log,.csv,.http,.yaml,.yml,.xml,.js,.ts,.py,.java,.go,.rs,.sql"
+            multiple
+            maxCount={5}
+            fileList={docFileList}
+            beforeUpload={(file) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const text = String(reader.result || '');
+                const clipped = text.length > 120000 ? `${text.slice(0, 120000)}\n... [文件内容已截断]` : text;
+                const block = [`--- 文件: ${file.name} ---`, clipped].join('\n');
+                setDocContextText((prev) => (prev.trim() ? `${prev}\n\n${block}` : block));
+                setDocContextName((prev) => (prev.trim() ? `${prev}, ${file.name}` : file.name));
+                setDocFileList((prev) => [...prev, { uid: file.uid, name: file.name, status: 'done' }]);
+                message.success(`已读取 ${file.name}`);
+              };
+              reader.readAsText(file as Blob);
+              return false;
+            }}
+            onRemove={(file) => {
+              setDocFileList((prev) => prev.filter((f) => f.uid !== file.uid));
+              return true;
+            }}
+          >
+            <Button icon={<UploadOutlined />}>上传文档（仅本轮使用）</Button>
+          </Upload>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            这些文档只会作为本轮对话补充上下文发送给模型，不会写入会话历史消息。
+          </Text>
+          <TextArea
+            rows={12}
+            value={docContextText}
+            onChange={(e) => setDocContextText(e.target.value)}
+            placeholder="可粘贴补充文档内容（如日志、配置、接口文档片段）…"
+          />
+        </Space>
+      </Modal>
 
       <Modal
         title="客户请求示例（Daytona 沙盒）"

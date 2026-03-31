@@ -957,19 +957,23 @@ export class KnowledgeBaseService {
     }
   }
 
-  /** 合并用户描述、请求示例与沙盒输出，供知识库/外部检索 */
+  /** 合并用户描述、请求示例、沙盒输出与临时文档上下文（文档不入库），供知识库/外部检索 */
   private buildTriageRetrievalQuery(
     question: string,
     requestExample: string | undefined,
     sandboxLog: string,
+    docContext?: string,
+    docName?: string,
   ): string {
-    if (!requestExample?.trim() && !sandboxLog.trim()) return question;
+    if (!requestExample?.trim() && !sandboxLog.trim() && !docContext?.trim()) return question;
     return [
       question,
       '--- 客户请求示例（节选） ---',
       (requestExample || '').trim().slice(0, 4000),
       '--- 沙盒执行输出（节选） ---',
       sandboxLog.trim().slice(0, 6000),
+      docContext?.trim() ? `--- 临时文档上下文（${docName?.trim() || '未命名文档'}，节选） ---` : '',
+      (docContext || '').trim().slice(0, 8000),
     ]
       .filter(Boolean)
       .join('\n');
@@ -1003,8 +1007,10 @@ export class KnowledgeBaseService {
     useSandbox?: boolean;
     requestExample?: string;
     aiSearchDepth?: AiSearchDepth;
+    docContext?: string;
+    docName?: string;
   }): AsyncGenerator<KbStreamPayload> {
-    const { sessionId, userId, question, history, usedSearchMode, sideQueue, useSandbox, requestExample, aiSearchDepth } =
+    const { sessionId, userId, question, history, usedSearchMode, sideQueue, useSandbox, requestExample, aiSearchDepth, docContext, docName } =
       params;
     const historyChat = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
     const historyForKb = [...historyChat, { role: 'user' as const, content: question }].slice(-10);
@@ -1035,7 +1041,7 @@ export class KnowledgeBaseService {
       }
       sideQueue.push({ type: 'status', phase: 'sandbox', detail: 'done', tool: 'daytona' });
     }
-    const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog);
+    const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog, docContext, docName);
 
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
@@ -1151,6 +1157,9 @@ export class KnowledgeBaseService {
       useSandbox && (requestExample?.trim() || sandboxLog)
         ? `\n\n---\n【客户请求示例】\n${(requestExample || '').trim() || '（无）'}\n\n【沙盒复现输出】\n${sandboxLog || '（无）'}\n`
         : '',
+      docContext?.trim()
+        ? `\n\n---\n【临时文档上下文（本轮，仅供推理）】\n文档: ${docName?.trim() || '未命名文档'}\n${docContext.trim().slice(0, 10000)}\n`
+        : '',
     ].join('');
 
     const runOneModel = async function* (
@@ -1238,6 +1247,8 @@ export class KnowledgeBaseService {
     aiSearchDepth?: AiSearchDepth;
     useSandbox?: boolean;
     requestExample?: string;
+    docContext?: string;
+    docName?: string;
   }): AsyncGenerator<KbStreamPayload> {
     const usedSearchMode: 'internal' | 'hybrid' = params.searchMode === 'hybrid' ? 'hybrid' : 'internal';
     let sessionId: string;
@@ -1264,6 +1275,8 @@ export class KnowledgeBaseService {
         sideQueue,
         useSandbox: params.useSandbox,
         requestExample: params.requestExample,
+        docContext: params.docContext,
+        docName: params.docName,
       })) {
         if (p.type === 'token' && p.source === 'llm') assistantText += p.text;
         if (p.type === 'meta') {
@@ -1295,6 +1308,8 @@ export class KnowledgeBaseService {
     aiSearchDepth?: AiSearchDepth;
     useSandbox?: boolean;
     requestExample?: string;
+    docContext?: string;
+    docName?: string;
   }) {
     const normalizeMessageContent = (content: any): string => {
       if (typeof content === 'string') return content;
@@ -1329,7 +1344,7 @@ export class KnowledgeBaseService {
       return '';
     };
 
-    const { sessionId, userId, question, history, searchMode, aiSearchDepth, useSandbox, requestExample } = params;
+    const { sessionId, userId, question, history, searchMode, aiSearchDepth, useSandbox, requestExample, docContext, docName } = params;
     const historyForKb = [...history, { role: 'user' as const, content: question }].slice(-10);
     let sandboxLog = '';
     if (useSandbox && requestExample?.trim()) {
@@ -1355,7 +1370,7 @@ export class KnowledgeBaseService {
         this.logger.warn(`Daytona audit 持久化跳过: ${auditErr?.message}`);
       }
     }
-    const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog);
+    const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog, docContext, docName);
 
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
@@ -1478,6 +1493,9 @@ export class KnowledgeBaseService {
                 useSandbox && (requestExample?.trim() || sandboxLog)
                   ? `\n\n---\n【客户请求示例】\n${(requestExample || '').trim() || '（无）'}\n\n【沙盒复现输出】\n${sandboxLog || '（无）'}\n`
                   : '',
+                docContext?.trim()
+                  ? `\n\n---\n【临时文档上下文（本轮，仅供推理）】\n文档: ${docName?.trim() || '未命名文档'}\n${docContext.trim().slice(0, 10000)}\n`
+                  : '',
               ].join(''),
             },
           ],
@@ -1534,6 +1552,8 @@ export class KnowledgeBaseService {
     aiSearchDepth?: AiSearchDepth;
     useSandbox?: boolean;
     requestExample?: string;
+    docContext?: string;
+    docName?: string;
   }) {
     const usedSearchMode: 'internal' | 'hybrid' = params.searchMode === 'hybrid' ? 'hybrid' : 'internal';
     const sessionId = await this.getOrCreateSession(params);
@@ -1549,6 +1569,8 @@ export class KnowledgeBaseService {
       aiSearchDepth: params.aiSearchDepth,
       useSandbox: params.useSandbox,
       requestExample: params.requestExample,
+      docContext: params.docContext,
+      docName: params.docName,
     });
     const answer = agentResult.answer;
 
