@@ -117,6 +117,12 @@ export default function KnowledgeBaseChat() {
     if (isCustomer) return !!verifiedCode;
     return true;
   }, [isCustomer, verifiedCode]);
+  const shouldShowThinkPanel =
+    !!llmThinkText ||
+    thinkHistory.length > 0 ||
+    !!aiSearchStreamText ||
+    !!sandboxStatus ||
+    !!retrievalStatus;
 
   const markdownComponents = useMemo(
     () => ({
@@ -978,7 +984,7 @@ export default function KnowledgeBaseChat() {
                       : 'none',
                 }}
               >
-                {(loading || llmThinkText || thinkHistory.length > 0) && (
+                {shouldShowThinkPanel && (
                   <div style={{ marginBottom: 24, padding: 16, background: '#f8f9fa', borderRadius: 12 }}>
                     <Text strong style={{ display: 'block', marginBottom: 12 }}>思考状态</Text>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
@@ -995,17 +1001,6 @@ export default function KnowledgeBaseChat() {
                               {retrievalStatus}
                             </Text>
                           ) : null}
-                          <Text type="secondary" style={{ fontSize: 13 }}>
-                            <Spin size="small" style={{ marginRight: 8 }} /> 分析问题中…
-                          </Text>
-                          {usedSearchMode === 'hybrid' ? (
-                            <Text type="secondary" style={{ fontSize: 13 }}>
-                              <Spin size="small" style={{ marginRight: 8 }} /> 调用 AI 搜索 Agent…
-                            </Text>
-                          ) : null}
-                          <Text type="secondary" style={{ fontSize: 13 }}>
-                            <Spin size="small" style={{ marginRight: 8 }} /> 检索内部知识库…
-                          </Text>
                         </>
                       ) : null}
                       {aiSearchStreamText ? (
