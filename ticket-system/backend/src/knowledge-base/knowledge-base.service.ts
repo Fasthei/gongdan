@@ -16,6 +16,8 @@ export interface KBSearchResult {
   content: string;
   platform?: string;
   score: number;
+  /** 可打开的原文链接（网页 citation、Azure blob / metadata_storage_path、base64 编码的 URL id 等） */
+  url?: string;
 }
 
 export interface KBSmartQueryResult {
@@ -66,6 +68,67 @@ export class KnowledgeBaseService {
     };
   }
 
+  /** 内部 KB 常见：id 为 base64(http/https...) */
+  private tryUrlFromBase64Id(id: string): string | undefined {
+    if (!id || typeof id !== 'string' || id.length < 12) return;
+    const normalized = id.replace(/-/g, '+').replace(/_/g, '/');
+    if (!/^[A-Za-z0-9+/=]+$/.test(normalized)) return;
+    try {
+      const pad = (4 - (normalized.length % 4)) % 4;
+      const decoded = Buffer.from(normalized + '='.repeat(pad), 'base64').toString('utf8');
+      if (/^https?:\/\//i.test(decoded)) return decoded;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private pickKbSourceUrl(item: any, fallbackId: string): string | undefined {
+    const raw = [
+      item?.url,
+      item?.link,
+      item?.source_url,
+      item?.href,
+      item?.sourceUrl,
+      item?.page_url,
+      item?.pageUrl,
+      item?.document_url,
+      item?.documentUrl,
+    ];
+    for (const c of raw) {
+      if (typeof c === 'string' && /^https?:\/\//i.test(c.trim())) return c.trim();
+    }
+    const blobish =
+      item?.metadata_storage_path ??
+      item?.metadataStoragePath ??
+      item?.storage_path ??
+      item?.storagePath ??
+      item?.blob_url;
+    if (typeof blobish === 'string' && /^https?:\/\//i.test(blobish.trim())) return blobish.trim();
+    return this.tryUrlFromBase64Id(fallbackId);
+  }
+
+  private mapKbSearchItem(item: any, idx: number): KBSearchResult {
+    const id = String(item?.id ?? item?.key ?? idx);
+    const title =
+      item?.title ||
+      item?.name ||
+      (typeof item?.url === 'string' && !/^https?:\/\//i.test(item.url) ? item.url : '') ||
+      '';
+    const content = item?.content || item?.text || item?.snippet || '';
+    const platform = item?.source || item?.platform || item?.domain || '';
+    const score = Number(item?.['@search.score'] ?? item?.score ?? item?.confidence ?? 0);
+    const url = this.pickKbSourceUrl(item, id);
+    const r: KBSearchResult = {
+      id,
+      title: title || (url ? '引用' : '未命名资料'),
+      content,
+      platform: platform || undefined,
+      score,
+    };
+    if (url) r.url = url;
+    return r;
+  }
+
   /**
    * 混合搜索（关键词 + 向量），支持 platform 过滤
    */
@@ -98,13 +161,7 @@ export class KnowledgeBaseService {
       // 兼容返回格式：{ results: [...] } 或直接数组
       const raw: any[] = Array.isArray(data) ? data : (data.results || data.value || []);
 
-      return raw.map((item: any) => ({
-        id: item.id || '',
-        title: item.title || '',
-        content: item.content || item.text || '',
-        platform: item.source || item.platform || '',
-        score: item['@search.score'] || item.score || 0,
-      }));
+      return raw.map((item: any, i: number) => this.mapKbSearchItem(item, i));
     } catch (err) {
       this.logger.error(`知识库搜索失败: ${err.message}`);
       return [];
@@ -127,13 +184,9 @@ export class KnowledgeBaseService {
         { headers: this.headers, timeout: 10000 },
       );
 
-      const sources: KBSearchResult[] = (data.sources || data.results || []).map((item: any) => ({
-        id: item.id || '',
-        title: item.title || '',
-        content: item.content || item.text || '',
-        platform: item.source || item.platform || '',
-        score: item.score || 0,
-      }));
+      const sources: KBSearchResult[] = (data.sources || data.results || []).map((item: any, i: number) =>
+        this.mapKbSearchItem(item, i),
+      );
 
       return { answer: data.answer || data.result || '', sources };
     } catch (err) {
@@ -217,6 +270,34 @@ export class KnowledgeBaseService {
     await this.prisma.$executeRawUnsafe(`
       ALTER TABLE kb_chat_messages
       ADD COLUMN IF NOT EXISTS search_mode TEXT;
+    `);
+    await this.prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS kb_sandbox_audit_events (
+        id TEXT PRIMARY KEY,
+        audit_entry_id TEXT NOT NULL UNIQUE,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        sandbox_id TEXT,
+        action TEXT,
+        target_type TEXT,
+        target_id TEXT,
+        status_code INTEGER,
+        error_message TEXT,
+        actor_id TEXT,
+        actor_email TEXT,
+        organization_id TEXT,
+        metadata_json TEXT,
+        audit_created_at TIMESTAMPTZ,
+        fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS kb_sandbox_audit_events_session_idx
+      ON kb_sandbox_audit_events (session_id);
+    `);
+    await this.prisma.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS kb_sandbox_audit_events_sandbox_idx
+      ON kb_sandbox_audit_events (sandbox_id);
     `);
     this.sessionTableReady = true;
   }
@@ -338,13 +419,17 @@ export class KnowledgeBaseService {
   private normalizeAiSearchSources(data: any): KBSearchResult[] {
     const refs = data?.references || data?.sources || data?.results || [];
     if (!Array.isArray(refs)) return [];
-    return refs.map((item: any, idx: number) => ({
-      id: item.id || `${idx}`,
-      title: item.title || item.name || item.url || 'AI Search Source',
-      content: item.snippet || item.content || item.text || '',
-      platform: item.domain || item.source || '',
-      score: Number(item.score || item.confidence || 0),
-    }));
+    return refs.map((item: any, idx: number) => {
+      const m = this.mapKbSearchItem(
+        {
+          ...item,
+          title: item.title || item.name || (typeof item.url === 'string' ? item.url : ''),
+        },
+        idx,
+      );
+      if (!m.title || m.title === '未命名资料') m.title = 'AI Search Source';
+      return m;
+    });
   }
 
   /**
@@ -391,13 +476,19 @@ export class KnowledgeBaseService {
 
     const sources: KBSearchResult[] =
       citations.length > 0
-        ? citations.map((c: any, idx: number) => ({
-            id: String(c.id ?? c.url ?? idx),
-            title: c.title || c.name || c.url || '引用',
-            content: c.snippet || c.text || c.content || '',
-            platform: c.domain || c.source || '',
-            score: Number(c.trust_score ?? c.score ?? 0),
-          }))
+        ? citations.map((c: any, idx: number) =>
+            this.mapKbSearchItem(
+              {
+                ...c,
+                id: c.id ?? c.url ?? idx,
+                title: c.title || c.name || '',
+                content: c.snippet || c.text || c.content || '',
+                platform: c.domain || c.source,
+                score: c.trust_score ?? c.score ?? 0,
+              },
+              idx,
+            ),
+          )
         : this.normalizeAiSearchSources(root);
 
     if (followUps.length === 0 && Array.isArray(root.follow_up_questions)) followUps = [...root.follow_up_questions];
@@ -588,7 +679,7 @@ export class KnowledgeBaseService {
 
   /** 混合模式写入 system prompt，供模型综合（避免仅靠工具调用时模型跳过外部检索） */
   /** 在 Daytona 中执行客户提供的 shell/curl 片段，用于隔离复现 HTTP/CLI 请求 */
-  private async runSandboxRequestExample(script: string): Promise<string> {
+  private async runSandboxRequestExample(script: string): Promise<{ output: string; sandboxId?: string }> {
     const apiKey = this.config.get<string>('DAYTONA_API_KEY')?.trim();
     const apiUrl = this.config.get<string>('DAYTONA_API_URL')?.trim() || 'https://app.daytona.io/api';
     const target = (this.config.get<string>('DAYTONA_TARGET')?.trim() as 'us' | 'eu') || 'us';
@@ -607,18 +698,179 @@ export class KnowledgeBaseService {
       auth: { apiKey, apiUrl },
       initialFiles: { '/tmp/request.sh': capped },
     });
+    const sandboxId = sb.id;
     try {
       await sb.execute('chmod +x /tmp/request.sh 2>/dev/null || true');
       const r = await sb.execute('bash -lc "bash /tmp/request.sh 2>&1"');
       const out = `${r.output || ''}${r.exitCode !== 0 ? `\n[exit code: ${r.exitCode}]` : ''}`;
       const maxOut = 12000;
-      return out.length > maxOut ? `${out.slice(0, maxOut)}\n... [输出已截断]` : out;
+      const output = out.length > maxOut ? `${out.slice(0, maxOut)}\n... [输出已截断]` : out;
+      return { output, sandboxId };
+    } catch (e: any) {
+      const err = new Error(e?.message || String(e)) as Error & { sandboxId?: string };
+      err.sandboxId = sandboxId;
+      throw err;
     } finally {
       try {
         await sb.close();
       } catch (e: any) {
         this.logger.warn(`Daytona sandbox close: ${e?.message}`);
       }
+    }
+  }
+
+  /**
+   * 拉取 Daytona Audit 中与本次 sandbox 相关的条目并写入 PG（与 kb_chat_sessions 通过 session_id 关联）。
+   * 见 https://www.daytona.io/docs/en/audit-logs/
+   */
+  private async persistDaytonaAuditForSandbox(params: {
+    sessionId: string;
+    userId: string;
+    sandboxId?: string;
+    runStartedAt: Date;
+  }): Promise<void> {
+    const { sessionId, userId, sandboxId, runStartedAt } = params;
+    const apiKey = this.config.get<string>('DAYTONA_API_KEY')?.trim();
+    const rawFetch = (this.config.get<string>('DAYTONA_AUDIT_FETCH') ?? '').trim().toLowerCase();
+    const auditDisabled = rawFetch === 'false' || rawFetch === '0' || rawFetch === 'off';
+    if (auditDisabled || !apiKey) return;
+    if (!sandboxId?.trim()) {
+      this.logger.debug('Daytona audit：无 sandboxId，跳过拉取');
+      return;
+    }
+
+    const apiBase = (this.config.get<string>('DAYTONA_API_URL')?.trim() || 'https://app.daytona.io/api').replace(
+      /\/$/,
+      '',
+    );
+    const orgId = this.config.get<string>('DAYTONA_ORGANIZATION_ID')?.trim();
+    const auditUrl = orgId
+      ? `${apiBase}/audit/organizations/${encodeURIComponent(orgId)}`
+      : `${apiBase}/audit`;
+
+    await this.ensureSessionTables();
+
+    const since = new Date(runStartedAt.getTime() - 120_000);
+    const sinceIso = since.toISOString();
+
+    const delayMs = Math.min(Number(this.config.get<string>('DAYTONA_AUDIT_DELAY_MS') || '2000') || 0, 30_000);
+    if (delayMs > 0) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+
+    let rows: any[] = [];
+    try {
+      const res = await axios.get(auditUrl, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        timeout: 20000,
+        validateStatus: () => true,
+      });
+      if (res.status < 200 || res.status >= 300) {
+        const hint =
+          typeof res.data === 'string'
+            ? res.data.slice(0, 240)
+            : res.data != null
+              ? JSON.stringify(res.data).slice(0, 240)
+              : '';
+        this.logger.warn(`Daytona audit HTTP ${res.status}${hint ? `: ${hint}` : ''}`);
+        return;
+      }
+      const data = res.data;
+      const raw =
+        Array.isArray(data) ? data : data?.items ?? data?.data ?? data?.logs ?? data?.auditLogs ?? [];
+      rows = Array.isArray(raw) ? raw : [];
+    } catch (e: any) {
+      this.logger.warn(`Daytona audit 拉取失败: ${e?.message}`);
+      return;
+    }
+
+    const sid = sandboxId.trim();
+    const matchesSandbox = (entry: any): boolean => {
+      if (!entry || typeof entry !== 'object') return false;
+      const tid = entry.targetId != null ? String(entry.targetId) : '';
+      if (tid === sid) return true;
+      const meta = entry.metadata;
+      if (meta && typeof meta === 'object') {
+        let ms = '';
+        if (meta.sandboxId != null) ms = String(meta.sandboxId);
+        else if (meta.sandbox_id != null) ms = String(meta.sandbox_id);
+        else if (meta.id != null) ms = String(meta.id);
+        if (ms === sid) return true;
+      }
+      try {
+        if (meta != null && JSON.stringify(meta).includes(sid)) return true;
+      } catch {
+        /* ignore */
+      }
+      return false;
+    };
+
+    const parseCreated = (entry: any): Date | null => {
+      const t = entry?.createdAt ?? entry?.created_at;
+      if (typeof t !== 'string') return null;
+      const d = new Date(t);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+
+    let matched = 0;
+    for (const entry of rows) {
+      if (!matchesSandbox(entry)) continue;
+      const created = parseCreated(entry);
+      if (created && created.toISOString() < sinceIso) continue;
+
+      const auditEntryId = entry.id != null ? String(entry.id) : '';
+      if (!auditEntryId) continue;
+
+      matched += 1;
+
+      const metadataJson =
+        entry.metadata !== undefined
+          ? typeof entry.metadata === 'string'
+            ? entry.metadata
+            : JSON.stringify(entry.metadata)
+          : null;
+
+      const rowId = randomUUID();
+      const statusCode =
+        entry.statusCode != null && entry.statusCode !== ''
+          ? Number(entry.statusCode)
+          : null;
+
+      try {
+        await this.prisma.$executeRawUnsafe(
+          `
+          INSERT INTO kb_sandbox_audit_events (
+            id, audit_entry_id, session_id, user_id, sandbox_id,
+            action, target_type, target_id, status_code, error_message,
+            actor_id, actor_email, organization_id, metadata_json, audit_created_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          ON CONFLICT (audit_entry_id) DO NOTHING
+          `,
+          rowId,
+          auditEntryId,
+          sessionId,
+          userId,
+          sid,
+          entry.action != null ? String(entry.action) : null,
+          entry.targetType != null ? String(entry.targetType) : null,
+          entry.targetId != null ? String(entry.targetId) : null,
+          Number.isFinite(statusCode as number) ? statusCode : null,
+          entry.errorMessage != null ? String(entry.errorMessage) : null,
+          entry.actorId != null ? String(entry.actorId) : null,
+          entry.actorEmail != null ? String(entry.actorEmail) : null,
+          entry.organizationId != null ? String(entry.organizationId) : orgId || null,
+          metadataJson,
+          created ? created.toISOString() : null,
+        );
+      } catch (ins: any) {
+        this.logger.warn(`Daytona audit 写入 PG 失败: ${ins?.message}`);
+      }
+    }
+
+    if (matched > 0) {
+      this.logger.log(
+        `Daytona audit：会话 ${sessionId} / sandbox ${sid} 时间窗内匹配 ${matched} 条审计事件（已尝试落库，重复 audit_entry_id 会忽略）`,
+      );
     }
   }
 
@@ -659,6 +911,8 @@ export class KnowledgeBaseService {
   }
 
   private async *streamChatWithAgent(params: {
+    sessionId: string;
+    userId: string;
     question: string;
     history: KBChatMessage[];
     usedSearchMode: 'internal' | 'hybrid';
@@ -666,18 +920,34 @@ export class KnowledgeBaseService {
     useSandbox?: boolean;
     requestExample?: string;
   }): AsyncGenerator<KbStreamPayload> {
-    const { question, history, usedSearchMode, sideQueue, useSandbox, requestExample } = params;
+    const { sessionId, userId, question, history, usedSearchMode, sideQueue, useSandbox, requestExample } =
+      params;
     const historyChat = history.slice(-10).map((h) => ({ role: h.role as 'user' | 'assistant', content: h.content }));
     const historyForKb = [...historyChat, { role: 'user' as const, content: question }].slice(-10);
 
     let sandboxLog = '';
     if (useSandbox && requestExample?.trim()) {
+      const runStartedAt = new Date();
       sideQueue.push({ type: 'status', phase: 'sandbox', detail: 'start', tool: 'daytona' });
+      let daytonaSandboxId: string | undefined;
       try {
-        sandboxLog = await this.runSandboxRequestExample(requestExample.trim());
+        const run = await this.runSandboxRequestExample(requestExample.trim());
+        sandboxLog = run.output;
+        daytonaSandboxId = run.sandboxId;
       } catch (e: any) {
         sandboxLog = `【沙盒执行失败】${e?.message || String(e)}`;
+        daytonaSandboxId = (e as Error & { sandboxId?: string })?.sandboxId;
         this.logger.warn(`Daytona: ${e?.message}`);
+      }
+      try {
+        await this.persistDaytonaAuditForSandbox({
+          sessionId,
+          userId,
+          sandboxId: daytonaSandboxId,
+          runStartedAt,
+        });
+      } catch (auditErr: any) {
+        this.logger.warn(`Daytona audit 持久化跳过: ${auditErr?.message}`);
       }
       sideQueue.push({ type: 'status', phase: 'sandbox', detail: 'done', tool: 'daytona' });
     }
@@ -686,10 +956,12 @@ export class KnowledgeBaseService {
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
     let confidence: number | undefined;
+    const sourceDedupeKey = (s: KBSearchResult) =>
+      (s.url?.trim() || s.id || `${s.title}::${s.platform || ''}`).slice(0, 512);
     const dedupeSource = (items: KBSearchResult[]) => {
-      const seen = new Set(sourceBucket.map((s) => `${s.title}::${s.platform || ''}`));
+      const seen = new Set(sourceBucket.map(sourceDedupeKey));
       for (const item of items) {
-        const key = `${item.title}::${item.platform || ''}`;
+        const key = sourceDedupeKey(item);
         if (!seen.has(key)) {
           seen.add(key);
           sourceBucket.push(item);
@@ -892,6 +1164,8 @@ export class KnowledgeBaseService {
     const sideQueue = new KbSideQueue();
     try {
       for await (const p of this.streamChatWithAgent({
+        sessionId,
+        userId: params.userId,
         question: params.message,
         history,
         usedSearchMode,
@@ -921,6 +1195,8 @@ export class KnowledgeBaseService {
   }
 
   private async buildAgentAnswer(params: {
+    sessionId: string;
+    userId: string;
     question: string;
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
     searchMode: 'internal' | 'hybrid';
@@ -960,15 +1236,30 @@ export class KnowledgeBaseService {
       return '';
     };
 
-    const { question, history, searchMode, useSandbox, requestExample } = params;
+    const { sessionId, userId, question, history, searchMode, useSandbox, requestExample } = params;
     const historyForKb = [...history, { role: 'user' as const, content: question }].slice(-10);
     let sandboxLog = '';
     if (useSandbox && requestExample?.trim()) {
+      const runStartedAt = new Date();
+      let daytonaSandboxId: string | undefined;
       try {
-        sandboxLog = await this.runSandboxRequestExample(requestExample.trim());
+        const run = await this.runSandboxRequestExample(requestExample.trim());
+        sandboxLog = run.output;
+        daytonaSandboxId = run.sandboxId;
       } catch (e: any) {
         sandboxLog = `【沙盒执行失败】${e?.message || String(e)}`;
+        daytonaSandboxId = (e as Error & { sandboxId?: string })?.sandboxId;
         this.logger.warn(`Daytona (sync): ${e?.message}`);
+      }
+      try {
+        await this.persistDaytonaAuditForSandbox({
+          sessionId,
+          userId,
+          sandboxId: daytonaSandboxId,
+          runStartedAt,
+        });
+      } catch (auditErr: any) {
+        this.logger.warn(`Daytona audit 持久化跳过: ${auditErr?.message}`);
       }
     }
     const retrievalQuery = this.buildTriageRetrievalQuery(question, requestExample, sandboxLog);
@@ -976,10 +1267,12 @@ export class KnowledgeBaseService {
     const sourceBucket: KBSearchResult[] = [];
     let followUps: string[] = [];
     let confidence: number | undefined;
+    const sourceDedupeKey = (s: KBSearchResult) =>
+      (s.url?.trim() || s.id || `${s.title}::${s.platform || ''}`).slice(0, 512);
     const dedupeSource = (items: KBSearchResult[]) => {
-      const seen = new Set(sourceBucket.map((s) => `${s.title}::${s.platform || ''}`));
+      const seen = new Set(sourceBucket.map(sourceDedupeKey));
       for (const item of items) {
-        const key = `${item.title}::${item.platform || ''}`;
+        const key = sourceDedupeKey(item);
         if (!seen.has(key)) {
           seen.add(key);
           sourceBucket.push(item);
@@ -1154,6 +1447,8 @@ export class KnowledgeBaseService {
     await this.addMessage(sessionId, 'user', params.message, usedSearchMode);
 
     const agentResult = await this.buildAgentAnswer({
+      sessionId,
+      userId: params.userId,
       question: params.message,
       history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
       searchMode: usedSearchMode,

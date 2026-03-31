@@ -570,14 +570,40 @@ export default function KnowledgeBaseChat() {
                   <div style={{ marginBottom: 24 }}>
                     <Text strong style={{ display: 'block', marginBottom: 12 }}>参考资料</Text>
                     <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                      {sources.map((s: any, idx) => (
-                        <div key={idx} style={{ background: '#f1f3f4', padding: '8px 12px', borderRadius: 8 }}>
-                          <Text style={{ fontSize: 13, display: 'block', fontWeight: 500 }} ellipsis={{ tooltip: s.title }}>
-                            {s.title || '未命名资料'}
-                          </Text>
-                          {s.platform && <Text type="secondary" style={{ fontSize: 12 }}>来源: {s.platform}</Text>}
-                        </div>
-                      ))}
+                      {sources.map((s: any, idx) => {
+                        const rawUrl = typeof s.url === 'string' ? s.url.trim() : '';
+                        const refUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : '';
+                        const title = s.title || '未命名资料';
+                        return (
+                          <div key={idx} style={{ background: '#f1f3f4', padding: '8px 12px', borderRadius: 8 }}>
+                            {refUrl ? (
+                              <a
+                                href={refUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: 500,
+                                  color: '#1a73e8',
+                                  display: 'block',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  textDecoration: 'none',
+                                }}
+                                title={title}
+                              >
+                                {title}
+                              </a>
+                            ) : (
+                              <Text style={{ fontSize: 13, display: 'block', fontWeight: 500 }} ellipsis={{ tooltip: title }}>
+                                {title}
+                              </Text>
+                            )}
+                            {s.platform && <Text type="secondary" style={{ fontSize: 12 }}>来源: {s.platform}</Text>}
+                          </div>
+                        );
+                      })}
                     </Space>
                   </div>
                 )}
