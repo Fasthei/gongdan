@@ -27,6 +27,13 @@ export interface KbEvent {
   ts: number;
 }
 
+export interface UiPayload {
+  component: string;
+  version: string;
+  props: Record<string, any>;
+  fallback_text?: string;
+}
+
 export interface Citation {
   title: string;
   url: string;

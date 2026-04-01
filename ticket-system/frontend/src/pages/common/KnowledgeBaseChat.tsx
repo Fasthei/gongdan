@@ -40,7 +40,8 @@ import {
   restoreSession,
   streamChat,
 } from '../../services/kbChatApi';
-import { ChatMessage, Citation, KbEvent } from '../../types/kbChat';
+import { ChatMessage, Citation, KbEvent, UiPayload } from '../../types/kbChat';
+import { renderUiPayload } from '../../components/kb/uiRegistry';
 
 const { TextArea } = Input;
 const { Text, Title } = Typography;
@@ -68,7 +69,7 @@ export default function KnowledgeBaseChat() {
   const [citations, setCitations] = React.useState<Citation[]>([]);
   const [interruptInfo, setInterruptInfo] = React.useState<any>(null);
   const [checkpoints, setCheckpoints] = React.useState<any[]>([]);
-  const [structuredBlocks, setStructuredBlocks] = React.useState<any[]>([]);
+  const [structuredBlocks, setStructuredBlocks] = React.useState<UiPayload[]>([]);
   const [joinedFromSeq, setJoinedFromSeq] = React.useState(1);
   const [stepText, setStepText] = React.useState('空闲');
   const [ttftMs, setTtftMs] = React.useState<number | null>(null);
@@ -161,7 +162,7 @@ export default function KnowledgeBaseChat() {
       setCheckpoints((prev) => [...prev, evt.payload]);
     }
     if (evt.type === 'ui_payload') {
-      setStructuredBlocks((prev) => [...prev, evt.payload]);
+      setStructuredBlocks((prev) => [...prev, evt.payload as UiPayload]);
     }
     if (evt.type === 'message_end') {
       setStepText('已完成');
@@ -374,7 +375,17 @@ export default function KnowledgeBaseChat() {
           <Collapse
             items={[
               { key: 'tools', label: `工具状态 (${toolStates.length})`, children: <List size="small" dataSource={toolStates} renderItem={(x) => <List.Item>{x.name} · {x.status} · {x.step || '-'}</List.Item>} /> },
-              { key: 'structured', label: `Structured / Generative UI (${structuredBlocks.length})`, children: <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(structuredBlocks, null, 2)}</pre> },
+              {
+                key: 'structured',
+                label: `Structured / Generative UI (${structuredBlocks.length})`,
+                children: structuredBlocks.length ? (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    {structuredBlocks.map((payload, idx) => renderUiPayload(payload, idx))}
+                  </Space>
+                ) : (
+                  <Text type="secondary">暂无可渲染组件</Text>
+                ),
+              },
               { key: 'join', label: 'Join/Rejoin 状态', children: <Text>最后序号：{joinedFromSeq}（断线后可从该 seq 续取）; 首 token: {ttftMs ?? '-'} ms</Text> },
             ]}
           />

@@ -59,7 +59,16 @@ async def run_pipeline(run: dict[str, Any], prompt: str) -> None:
         emit(run_id, "token", {"text": ch})
         await asyncio.sleep(0.005)
 
-    emit(run_id, "ui_payload", {"component": "reference_list", "version": "1", "props": {"items": citation_items}, "fallback_text": "参考资料"})
+    emit(
+        run_id,
+        "ui_payload",
+        {"component": "reference_list", "version": "1", "props": {"items": citation_items}, "fallback_text": "参考资料"},
+    )
+    emit(
+        run_id,
+        "ui_payload",
+        {"component": "status_panel", "version": "1", "props": {"status": "ok", "message": "已完成检索与生成阶段"}, "fallback_text": "状态面板"},
+    )
     run["status"] = "completed"
     emit(
         run_id,
