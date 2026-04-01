@@ -14,6 +14,7 @@ import {
   UploadOutlined,
   InfoCircleOutlined,
   DownloadOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -195,6 +196,37 @@ export default function KnowledgeBaseChat() {
     if (!customerCode.trim()) return message.warning('请先输入客户编号');
     setVerifiedCode(customerCode.trim());
     message.success('客户编号已确认，可以开始知识库对话');
+  };
+
+  const deleteSession = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除这条历史对话吗？删除后无法恢复。',
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.delete(`/knowledge-base/chat/sessions/${id}`);
+          message.success('删除成功');
+          setChatHistoryList((prev) => prev.filter((item) => item.id !== id));
+          if (sessionId === id) {
+            setSessionId('');
+            setChat([]);
+            setSources([]);
+            setFollowUps([]);
+            setLlmThinkText('');
+            setThinkHistory([]);
+            llmThinkRef.current = '';
+            localStorage.removeItem('kb-chat-session-id');
+            localStorage.removeItem('kb-chat-history');
+          }
+        } catch (err) {
+          message.error('删除失败');
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -757,13 +789,22 @@ export default function KnowledgeBaseChat() {
                         localStorage.setItem('kb-chat-session-id', item.id);
                       }}
                     >
-                      <div style={{ width: '100%', overflow: 'hidden' }}>
-                        <Text ellipsis style={{ display: 'block', fontSize: 14, color: sessionId === item.id ? '#1677ff' : '#333' }}>
-                          {item.title || '新对话'}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {new Date(item.updatedAt).toLocaleDateString()}
-                        </Text>
+                      <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ overflow: 'hidden', flex: 1 }}>
+                          <Text ellipsis style={{ display: 'block', fontSize: 14, color: sessionId === item.id ? '#1677ff' : '#333' }}>
+                            {item.title || '新对话'}
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {new Date(item.updatedAt).toLocaleDateString()}
+                          </Text>
+                        </div>
+                        <Button 
+                          type="text" 
+                          size="small" 
+                          icon={<DeleteOutlined />} 
+                          onClick={(e) => deleteSession(e, item.id)}
+                          style={{ color: '#ff4d4f', flexShrink: 0 }}
+                        />
                       </div>
                     </List.Item>
                   )}
