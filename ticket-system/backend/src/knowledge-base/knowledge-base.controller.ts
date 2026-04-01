@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors, Get, Param, Res, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors, Get, Param, Res, Req, Delete } from '@nestjs/common';
 import { Response } from 'express';
 import { KnowledgeBaseService } from './knowledge-base.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -172,5 +172,11 @@ export class KnowledgeBaseController {
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
   getChatHistory(@Param('sessionId') sessionId: string, @Request() req: any) {
     return this.kbService.getSessionMessages(sessionId, req.user.id);
+  }
+
+  @Delete('chat/sessions/:sessionId')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  async deleteChatSession(@Param('sessionId') sessionId: string, @Request() req: any) {
+    return this.kbService.deleteSession(sessionId, req.user.id);
   }
 }
