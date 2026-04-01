@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Typography, Space, List, Tag, Spin, Avatar, Modal, Upload, Select, Tooltip, Input, message } from 'antd';
+import { Button, Typography, Space, List, Tag, Spin, Avatar, Modal, Upload, Select, Tooltip, Input, message, Collapse } from 'antd';
 import { 
   RobotOutlined, UserOutlined, SendOutlined, ReloadOutlined, ArrowLeftOutlined, 
   PlusOutlined, GlobalOutlined, CodeOutlined, CopyOutlined, UploadOutlined, 
@@ -75,14 +75,43 @@ export function ChatMessageList({ ctx }: { ctx: KbChatContextType }) {
                           <div style={{ fontWeight: 500, marginBottom: 4, color: '#202124' }}>
                             {role === 'user' ? '您' : '知识库助手'}
                           </div>
-                          <div className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
-                            {role === 'user' ? (
-                              <div style={{ whiteSpace: 'pre-wrap' }}>{content}</div>
-                            ) : (
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                {content}
-                              </ReactMarkdown>
-                            )}
+                          <div className="message-parts" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {msg.content.map((part: any, idx: number) => {
+                              if (part.type === 'reasoning') {
+                                return (
+                                  <Collapse
+                                    key={idx}
+                                    size="small"
+                                    ghost
+                                    items={[
+                                      {
+                                        key: '1',
+                                        label: <span style={{ color: '#666', fontSize: 13 }}>思考过程</span>,
+                                        children: (
+                                          <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, color: '#666', background: '#f5f5f5', padding: 12, borderRadius: 8 }}>
+                                            {part.text}
+                                          </div>
+                                        ),
+                                      },
+                                    ]}
+                                  />
+                                );
+                              }
+                              if (part.type === 'text') {
+                                return (
+                                  <div key={idx} className="markdown-body" style={{ color: '#3c4043', fontSize: 15, lineHeight: 1.6, wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                                    {role === 'user' ? (
+                                      <div style={{ whiteSpace: 'pre-wrap' }}>{part.text}</div>
+                                    ) : (
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                        {part.text}
+                                      </ReactMarkdown>
+                                    )}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })}
                           </div>
                           {searchMode && (
                             <div style={{ marginTop: 8 }}>
