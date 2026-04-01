@@ -9,6 +9,11 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
     return {
       role: msg.role,
       content: [{ type: 'text', text: msg.content || '' }],
+      metadata: {
+        custom: {
+          searchMode: msg.searchMode,
+        }
+      }
     };
   }, []);
 

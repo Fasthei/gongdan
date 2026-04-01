@@ -9,15 +9,18 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { KbChatContextType } from '../useKbChat';
 
+import { useAui, useAuiState } from '@assistant-ui/react';
+
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 export function ChatInputArea({ ctx }: { ctx: KbChatContextType }) {
+  const aui = useAui();
+  const isRunning = useAuiState((s) => s.thread.isRunning);
+
   const {
     aiSearchDepth,
-    ask,
     canAsk,
-    chat,
     docAttachments,
     docGenMode,
     getDocKind,
@@ -61,7 +64,10 @@ export function ChatInputArea({ ctx }: { ctx: KbChatContextType }) {
                   onPressEnter={(e) => {
                     if (!e.shiftKey) {
                       e.preventDefault();
-                      void ask();
+                      if (question.trim() && canAsk && !isRunning) {
+                        aui.thread().append({ role: 'user', content: [{ type: 'text', text: question.trim() }] });
+                        setQuestion('');
+                      }
                     }
                   }}
                 />
@@ -219,8 +225,13 @@ export function ChatInputArea({ ctx }: { ctx: KbChatContextType }) {
                     type="primary" 
                     shape="circle" 
                     icon={<SendOutlined />} 
-                    onClick={() => ask()} 
-                    loading={loading} 
+                    onClick={() => {
+                      if (question.trim() && canAsk && !isRunning) {
+                        aui.thread().append({ role: 'user', content: [{ type: 'text', text: question.trim() }] });
+                        setQuestion('');
+                      }
+                    }} 
+                    loading={isRunning || loading} 
                     disabled={!question.trim() || !canAsk}
                   />
                 </div>
