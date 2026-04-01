@@ -200,11 +200,6 @@ export function useKbChat() {
 
   const deleteSession = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const sessionIdToDelete = String(id || '').trim();
-    if (!sessionIdToDelete) {
-      message.error('无效的会话 ID');
-      return;
-    }
     Modal.confirm({
       title: '确认删除',
       content: '确定要删除这条历史对话吗？删除后无法恢复。',
@@ -212,19 +207,11 @@ export function useKbChat() {
       okType: 'danger',
       cancelText: '取消',
       onOk: async () => {
-        const errText = (err: unknown) => {
-          const ax = err as { response?: { data?: { message?: string | string[] } } };
-          const m = ax?.response?.data?.message;
-          if (Array.isArray(m)) return m.join('; ');
-          if (typeof m === 'string' && m.trim()) return m;
-          return '删除失败';
-        };
         try {
-          // 优先 POST：部分 CDN/网关对 DELETE 转发不完整；与后端 delete 逻辑一致
-          await api.post('/knowledge-base/chat/sessions/delete', { sessionId: sessionIdToDelete });
+          await api.delete(`/knowledge-base/chat/sessions/${id}`);
           message.success('删除成功');
-          setChatHistoryList((prev) => prev.filter((item) => item.id !== sessionIdToDelete));
-          if (sessionId === sessionIdToDelete) {
+          setChatHistoryList((prev) => prev.filter((item) => item.id !== id));
+          if (sessionId === id) {
             setSessionId('');
             setChat([]);
             setSources([]);
@@ -235,8 +222,9 @@ export function useKbChat() {
             localStorage.removeItem('kb-chat-session-id');
             localStorage.removeItem('kb-chat-history');
           }
-        } catch (err) {
-          message.error(errText(err));
+        } catch (err: any) {
+          const msg = err?.response?.data?.message;
+          message.error(typeof msg === 'string' ? msg : '删除失败，请重试');
         }
       },
     });
