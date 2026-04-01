@@ -1,4 +1,17 @@
-import { Controller, Post, Body, UseGuards, UploadedFile, UseInterceptors, Get, Param, Res, Req, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  UploadedFile,
+  UseInterceptors,
+  Get,
+  Param,
+  Res,
+  Req,
+  Delete,
+  BadRequestException,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { KnowledgeBaseService } from './knowledge-base.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -178,5 +191,15 @@ export class KnowledgeBaseController {
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
   async deleteChatSession(@Param('sessionId') sessionId: string, @Request() req: any) {
     return this.kbService.deleteSession(sessionId, req.user.id);
+  }
+
+  /** 与 DELETE 等价：部分网关/代理对 DELETE 支持不佳时可走此接口 */
+  @Post('chat/sessions/delete')
+  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
+  async deleteChatSessionPost(@Body('sessionId') sessionId: string, @Request() req: any) {
+    if (!sessionId?.trim()) {
+      throw new BadRequestException('sessionId 不能为空');
+    }
+    return this.kbService.deleteSession(sessionId.trim(), req.user.id);
   }
 }

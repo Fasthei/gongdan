@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import FormData from 'form-data';
@@ -1878,23 +1878,36 @@ export class KnowledgeBaseService {
 
 
   async deleteSession(sessionId: string, userId: string) {
+    const sid = sessionId?.trim();
+    if (!sid) {
+      throw new NotFoundException('会话不存在或无权删除');
+    }
     await this.ensureSessionTables();
     const own = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT id FROM kb_chat_sessions WHERE id = $1 AND user_id = $2 LIMIT 1`,
-      sessionId,
-      userId,
+      sid,
+      String(userId),
     );
     if (own.length === 0) {
-      throw new Error('会话不存在或无权删除');
+      throw new NotFoundException('会话不存在或无权删除');
     }
-    await this.prisma.$executeRawUnsafe(
-      `DELETE FROM kb_chat_messages WHERE session_id = $1`,
-      sessionId,
-    );
-    await this.prisma.$executeRawUnsafe(
-      `DELETE FROM kb_chat_sessions WHERE id = $1`,
-      sessionId,
-    );
+    try {
+      await this.prisma.$executeRawUnsafe(
+        `DELETE FROM kb_sandbox_audit_events WHERE session_id = $1`,
+        sid,
+      );
+      await this.prisma.$executeRawUnsafe(
+        `DELETE FROM kb_chat_messages WHERE session_id = $1`,
+        sid,
+      );
+      await this.prisma.$executeRawUnsafe(
+        `DELETE FROM kb_chat_sessions WHERE id = $1`,
+        sid,
+      );
+    } catch (e: any) {
+      this.logger.error(`deleteSession DB error: ${e?.message || e}`);
+      throw e;
+    }
     return { success: true };
   }
 }
