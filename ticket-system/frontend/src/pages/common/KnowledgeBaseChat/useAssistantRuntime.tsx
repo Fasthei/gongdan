@@ -1,9 +1,9 @@
 import { useExternalStoreRuntime, ThreadMessageLike, AppendMessage } from '@assistant-ui/react';
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { KbChatContextType } from './useKbChat';
 
 export function useAssistantRuntime(ctx: KbChatContextType) {
-  const { chat, loading, ask } = ctx;
+  const { chat, loading, ask, setQuestion } = ctx;
 
   const convertMessage = useCallback((msg: any): ThreadMessageLike => {
     return {
@@ -15,9 +15,15 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
   const onNew = async (message: AppendMessage) => {
     if (message.content[0]?.type !== 'text') return;
     const text = message.content[0].text;
-    ctx.setQuestion(text);
-    // We need to trigger `ask` but `ask` reads from `question` state which is async.
-    // So we might need to modify `ask` to accept an optional parameter.
+    
+    // We need to set the question and then call ask.
+    // However, ask() reads from the `question` state which is updated asynchronously.
+    // To fix this without changing useKbChat too much, we can just call setQuestion 
+    // and let a useEffect in the component call ask(), or we can pass the text to ask().
+    // For now, let's assume we modify useKbChat's ask to accept an optional parameter.
+    
+    // Actually, we can just patch useKbChat to accept an optional `overrideQuestion` parameter.
+    await ask(text);
   };
 
   const runtime = useExternalStoreRuntime({

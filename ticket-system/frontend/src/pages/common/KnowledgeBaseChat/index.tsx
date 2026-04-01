@@ -65,9 +65,12 @@ import { ChatRightPanel } from './components/ChatRightPanel';
 import { ChatInputArea } from './components/ChatInputArea';
 import { SandboxModal } from './components/SandboxModal';
 import { useKbChat } from './useKbChat';
+import { useAssistantRuntime } from './useAssistantRuntime';
+import { AssistantRuntimeProvider } from '@assistant-ui/react';
 
 export default function KnowledgeBaseChat() {
   const ctx = useKbChat();
+  const runtime = useAssistantRuntime(ctx);
   const {
     CURL_EXAMPLE_TEMPLATE,
     aiSearchDepth,
@@ -138,8 +141,9 @@ export default function KnowledgeBaseChat() {
   } = ctx;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', background: '#fff', margin: '0' }}>
-      {/* Header */}
+    <AssistantRuntimeProvider runtime={runtime}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', background: '#fff', margin: '0' }}>
+        {/* Header */}
       <div style={{ padding: '20px 20px 10px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => window.history.back()} />
@@ -220,5 +224,6 @@ export default function KnowledgeBaseChat() {
 
       <SandboxModal ctx={ctx} />
     </div>
+    </AssistantRuntimeProvider>
   );
 }

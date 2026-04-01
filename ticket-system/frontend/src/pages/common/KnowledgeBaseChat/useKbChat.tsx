@@ -358,8 +358,9 @@ export function useKbChat() {
     return res;
   };
 
-  const ask = async () => {
-    if (!question.trim()) return;
+  const ask = async (overrideQuestion?: string) => {
+    const q = (overrideQuestion || question).trim();
+    if (!q) return;
     if (!canAsk) return message.warning('客户请先输入并确认客户编号');
     if (sandboxMode && !requestExampleText.trim()) {
       message.warning('已开启沙盒排错：请先打开「请求示例」，粘贴或上传客户请求脚本');
@@ -367,7 +368,7 @@ export function useKbChat() {
       return;
     }
 
-    const userMsg: ChatItem = { role: 'user', content: question.trim(), searchMode };
+    const userMsg: ChatItem = { role: 'user', content: q, searchMode };
     const placeholderAssistant: ChatItem = { role: 'assistant', content: '', searchMode };
     const nextChat = [...chat, userMsg, placeholderAssistant];
     setChat(nextChat);

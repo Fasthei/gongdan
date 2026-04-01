@@ -219,7 +219,7 @@ export function ChatInputArea({ ctx }: { ctx: KbChatContextType }) {
                     type="primary" 
                     shape="circle" 
                     icon={<SendOutlined />} 
-                    onClick={ask} 
+                    onClick={() => ask()} 
                     loading={loading} 
                     disabled={!question.trim() || !canAsk}
                   />
