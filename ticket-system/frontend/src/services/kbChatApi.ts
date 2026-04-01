@@ -5,12 +5,9 @@ let cachedBase = '';
 
 function kbBaseCandidates() {
   const envOrigin = (import.meta.env.VITE_KB_CHAT_API_ORIGIN || '').trim().replace(/\/$/, '');
-  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const defaults = [
     envOrigin,
     'https://aichatgongdan-dna6ghavchd9h6e0.eastasia-01.azurewebsites.net',
-    appOrigin,
-    apiUrl('').replace(/\/$/, ''),
   ].filter(Boolean);
   return Array.from(new Set(defaults));
 }
@@ -21,11 +18,13 @@ async function fetchKb(path: string, init?: RequestInit) {
   for (const base of tries) {
     try {
       const res = await fetch(`${base}${path}`, init);
-      if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      const looksJson = ct.includes('application/json');
+      if (res.ok && looksJson) {
         cachedBase = base;
         return res;
       }
-      lastError = new Error(`HTTP ${res.status} from ${base}`);
+      lastError = new Error(`HTTP ${res.status} / non-json response from ${base}`);
     } catch (e) {
       lastError = e;
     }
