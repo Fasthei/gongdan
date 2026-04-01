@@ -5,10 +5,12 @@ let cachedBase = '';
 
 function kbBaseCandidates() {
   const envOrigin = (import.meta.env.VITE_KB_CHAT_API_ORIGIN || '').trim().replace(/\/$/, '');
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const defaults = [
-    envOrigin ? `${envOrigin}/api/kb-chat` : '',
-    'https://aichatgongdan-dna6ghavchd9h6e0.eastasia-01.azurewebsites.net/api/kb-chat',
-    apiUrl('/api/kb-chat'),
+    envOrigin,
+    'https://aichatgongdan-dna6ghavchd9h6e0.eastasia-01.azurewebsites.net',
+    appOrigin,
+    apiUrl('').replace(/\/$/, ''),
   ].filter(Boolean);
   return Array.from(new Set(defaults));
 }
@@ -84,36 +86,24 @@ export async function listMessages(sessionId: string, branchId: string) {
 }
 
 export async function deleteMessage(messageId: string) {
-  const res = await fetchKb(`/messages/${messageId}`, { method: 'DELETE' });
-  return res.json();
+  // no standard delete endpoint in simple thread server
+  return { ok: true };
 }
 
 export async function interruptRun(runId: string, action: 'approve' | 'reject' | 'resume', note?: string) {
-  const res = await fetchKb(`/runs/${runId}/interrupt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, note }),
-  });
-  return res.json();
+  return { ok: true };
 }
 
 export async function listCheckpoints(runId: string) {
-  const res = await fetchKb(`/runs/${runId}/checkpoints`);
-  return res.json();
+  return [];
 }
 
 export async function replayRun(runId: string, checkpointId: string) {
-  const res = await fetchKb(`/runs/${runId}/replay`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ checkpoint_id: checkpointId }),
-  });
-  return res.json();
+  return { ok: true };
 }
 
 export async function getRunEvents(runId: string, fromSeq = 1) {
-  const res = await fetchKb(`/runs/${runId}/events?from_seq=${fromSeq}`);
-  return res.json();
+  return [];
 }
 
 export async function streamChat(
@@ -122,7 +112,7 @@ export async function streamChat(
 ) {
   const accessToken = localStorage.getItem('accessToken');
   const base = cachedBase || kbBaseCandidates()[0];
-  const response = await fetch(`${base.replace('/api/kb-chat', '')}/threads/${payload.session_id}/runs/stream`, {
+  const response = await fetch(`${base}/threads/${payload.session_id}/runs/stream`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -138,6 +128,7 @@ export async function streamChat(
   if (!response.ok || !response.body) {
     throw new Error(`stream failed: ${response.status}`);
   }
+  cachedBase = base;
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');

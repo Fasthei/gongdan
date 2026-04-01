@@ -6,7 +6,9 @@
  */
 export function getApiOrigin(): string {
   const v = import.meta.env.VITE_API_ORIGIN;
-  return typeof v === 'string' ? v.replace(/\/$/, '').trim() : '';
+  if (typeof v === 'string' && v.trim()) return v.replace(/\/$/, '').trim();
+  // fallback to backend host when SWA /api rewrite does not forward POST correctly
+  return 'https://gongdan-b5fzbtgteqd5gzfb.eastasia-01.azurewebsites.net';
 }
 
 /** 浏览器侧完整 URL，例如 /api/foo 或 https://host/api/foo */
