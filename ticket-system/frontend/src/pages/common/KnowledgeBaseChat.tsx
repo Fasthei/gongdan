@@ -79,9 +79,9 @@ export default function KnowledgeBaseChat() {
     const v = localStorage.getItem('kb-chat-search-mode');
     return v === 'hybrid' ? 'hybrid' : 'internal';
   });
-  const [aiSearchDepth, setAiSearchDepth] = useState<'quick' | 'deep'>(() => {
+  const [aiSearchDepth, setAiSearchDepth] = useState<'fast' | 'deep'>(() => {
     const v = localStorage.getItem('kb-ai-search-depth');
-    return v === 'quick' ? 'quick' : 'deep';
+    return v === 'fast' || v === 'quick' ? 'fast' : 'deep';
   });
   const [usedSearchMode, setUsedSearchMode] = useState<'internal' | 'hybrid'>('internal');
   const [sandboxMode, setSandboxMode] = useState(() => localStorage.getItem('kb-sandbox-mode') === '1');
@@ -461,37 +461,19 @@ export default function KnowledgeBaseChat() {
             setRetrievalStatus(
               json.detail === 'start' ? '正在调用外部 AI 搜索…' : '外部 AI 搜索完成',
             );
-          } else if (json.phase === 'ai_search_sse' && json.detail) {
-            const ev = String(json.detail || '').trim();
-            setRetrievalStatus(`AI 搜索流: ${ev}`);
-            const importantEvents = new Set([
-              'connected',
-              'query_plan',
-              'cache_hit',
-              'decomposed',
-              'expanded',
-              'round_started',
-              'round_finished',
-              'llm_started',
-              'result',
-              'timeout',
-            ]);
-            if (ev && importantEvents.has(ev) && !aiSearchThinkEventsRef.current.has(ev)) {
-              aiSearchThinkEventsRef.current.add(ev);
-              const evLabelMap: Record<string, string> = {
-                connected: '已连接搜索流',
-                query_plan: '生成检索计划',
-                cache_hit: '命中缓存',
-                decomposed: '查询分解',
-                expanded: '查询扩展',
-                round_started: '检索轮次开始',
-                round_finished: '检索轮次结束',
-                llm_started: '搜索总结开始',
-                result: '搜索结果完成',
-                timeout: '搜索超时',
-              };
-              const label = evLabelMap[ev] || ev;
-              appendThinkDelta(`\n▸ AI搜索：${label}\n`);
+          } else if (json.phase === 'jina_initialize') {
+            setRetrievalStatus(json.detail === 'start' ? '正在初始化 Jina MCP…' : 'Jina MCP 已就绪');
+          } else if (json.phase === 'jina_fast_search') {
+            setRetrievalStatus(json.detail === 'start' ? 'Fast 模式：正在外部检索…' : 'Fast 模式检索完成');
+          } else if (json.phase === 'deep_expand_query') {
+            setRetrievalStatus(json.detail === 'start' ? 'Deep 模式：正在扩展查询…' : 'Deep 模式：查询扩展完成');
+          } else if (json.phase === 'deep_parallel_search') {
+            setRetrievalStatus(json.detail === 'start' ? 'Deep 模式：并行检索中…' : 'Deep 模式：并行检索完成');
+          } else if (json.phase === 'deep_rerank') {
+            setRetrievalStatus(json.detail === 'start' ? 'Deep 模式：重排中…' : 'Deep 模式：重排完成');
+            if (json.detail === 'start' && !aiSearchThinkEventsRef.current.has('deep_rerank')) {
+              aiSearchThinkEventsRef.current.add('deep_rerank');
+              appendThinkDelta('\n▸ Deep 重排：根据问题语义对内外部候选来源重新排序。\n');
             }
           } else {
             setRetrievalStatus(
@@ -1301,18 +1283,18 @@ export default function KnowledgeBaseChat() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Button
                         size="small"
-                        type={aiSearchDepth === 'quick' ? 'primary' : 'default'}
+                        type={aiSearchDepth === 'fast' ? 'primary' : 'default'}
                         onClick={() => {
-                          setAiSearchDepth('quick');
-                          localStorage.setItem('kb-ai-search-depth', 'quick');
+                          setAiSearchDepth('fast');
+                          localStorage.setItem('kb-ai-search-depth', 'fast');
                         }}
                         style={{
                           borderRadius: 999,
-                          border: aiSearchDepth === 'quick' ? '1px solid #1677ff' : '1px solid #d9d9d9',
-                          boxShadow: aiSearchDepth === 'quick' ? '0 0 0 1px rgba(22,119,255,0.2)' : 'none',
+                          border: aiSearchDepth === 'fast' ? '1px solid #1677ff' : '1px solid #d9d9d9',
+                          boxShadow: aiSearchDepth === 'fast' ? '0 0 0 1px rgba(22,119,255,0.2)' : 'none',
                         }}
                       >
-                        快速搜索
+                        Fast 搜索
                       </Button>
                       <Button
                         size="small"

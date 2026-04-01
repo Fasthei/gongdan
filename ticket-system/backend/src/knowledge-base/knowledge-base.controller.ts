@@ -53,9 +53,9 @@ export class KnowledgeBaseController {
     return this.kbService.smartQuery(body.question, body.topK, body.history);
   }
 
-  @Post('ai-search/quick')
+  @Post('ai-search/fast')
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
-  async aiSearchQuick(
+  async aiSearchFast(
     @Body() body: { query: string; customerCode?: string },
     @Request() req: any,
   ) {
@@ -74,7 +74,7 @@ export class KnowledgeBaseController {
         throw new ForbiddenException('客户编号校验失败，无法使用知识库');
       }
     }
-    return this.kbService.aiSearch(body.query.trim(), 'quick');
+    return this.kbService.aiSearch(body.query.trim(), 'fast');
   }
 
   @Post('upload')
@@ -124,7 +124,7 @@ export class KnowledgeBaseController {
       docName?: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
-      aiSearchDepth?: 'quick' | 'deep';
+      aiSearchDepth?: 'fast' | 'deep';
       useSandbox?: boolean;
       requestExample?: string;
     },
@@ -160,7 +160,7 @@ export class KnowledgeBaseController {
     });
   }
 
-  /** SSE：内部知识库仍单次请求；主模型 token 流式；AI 搜索在配置 AI_SEARCH_SSE_PATH 时可 SSE，否则仅状态 + 单次 JSON */
+  /** SSE：内部知识库单次请求；主模型 token 流式；外部 AI 搜索输出阶段状态与简化推理 */
   @Post('chat/stream')
   @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
   async chatStream(
@@ -172,7 +172,7 @@ export class KnowledgeBaseController {
       docName?: string;
       customerCode?: string;
       searchMode?: 'internal' | 'hybrid';
-      aiSearchDepth?: 'quick' | 'deep';
+      aiSearchDepth?: 'fast' | 'deep';
       useSandbox?: boolean;
       requestExample?: string;
     },

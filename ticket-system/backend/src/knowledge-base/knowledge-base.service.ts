@@ -32,7 +32,7 @@ export interface KBChatMessage {
   createdAt?: string;
 }
 
-type AiSearchDepth = 'quick' | 'deep';
+type AiSearchDepth = 'fast' | 'deep';
 type DocOutputType = 'ppt' | 'word' | 'table';
 type DocIntent = {
   outputType: DocOutputType;
@@ -46,7 +46,8 @@ export class KnowledgeBaseService {
   private readonly logger = new Logger(KnowledgeBaseService.name);
   private readonly baseUrl: string;
   private readonly apiKey: string;
-  private readonly aiSearchBaseUrl: string;
+  private readonly jinaMcpUrl: string;
+  private readonly jinaApiKey: string;
   private readonly llmPrimaryModel: string;
   private readonly azureOpenAIEndpoint: string;
   private readonly azureOpenAIApiVersion: string;
@@ -65,9 +66,8 @@ export class KnowledgeBaseService {
       this.config.get<string>('KB_AGENT_URL') ||
       'https://agnetdoc-cve0guf5h8eggmej.southeastasia-01.azurewebsites.net';
     this.apiKey = this.config.get<string>('KB_AGENT_API_KEY') || '';
-    this.aiSearchBaseUrl =
-      this.config.get<string>('AI_SEARCH_AGENT_URL') ||
-      'https://aisousuogongdan-gehqaceacuf2cade.eastasia-01.azurewebsites.net';
+    this.jinaMcpUrl = (this.config.get<string>('JINA_MCP_URL') || 'https://mcp.jina.ai/v1').replace(/\/$/, '');
+    this.jinaApiKey = (this.config.get<string>('JINA_API_KEY') || '').trim();
     this.llmPrimaryModel = this.config.get<string>('LLM_PRIMARY_MODEL') || 'gpt-5.4';
     this.azureOpenAIEndpoint = this.config.get<string>('AZURE_OPENAI_ENDPOINT') || '';
     this.azureOpenAIApiVersion = this.config.get<string>('AZURE_OPENAI_API_VERSION') || '';
@@ -645,246 +645,139 @@ export class KnowledgeBaseService {
     }));
   }
 
-  private normalizeAiSearchSources(data: any): KBSearchResult[] {
-    const refs = data?.references || data?.sources || data?.results || [];
-    if (!Array.isArray(refs)) return [];
-    return refs.map((item: any, idx: number) => {
-      const m = this.mapKbSearchItem(
-        {
-          ...item,
-          title: item.title || item.name || (typeof item.url === 'string' ? item.url : ''),
-        },
-        idx,
-      );
-      if (!m.title || m.title === '未命名资料') m.title = 'AI Search Source';
-      return m;
-    });
-  }
-
-  /**
-   * aisousuo /api/search 与 SSE result 事件的响应体对齐：
-   * answer / answer.text、answer.confidence、answer.follow_up_questions、answer.citations[].trust_score
-   */
-  private mapAisousuoSearchResponse(data: any): {
-    answer: string;
-    sources: KBSearchResult[];
-    followUps: string[];
-    confidence?: number;
-  } {
-    if (!data || typeof data !== 'object') {
-      return { answer: '', sources: [], followUps: [] };
-    }
-    const root = data.result && typeof data.result === 'object' ? data.result : data;
-    const ans = root.answer;
-    let answerText = '';
-    let confidence: number | undefined;
-    let followUps: string[] = [];
-    const citations: any[] = [];
-
-    if (typeof ans === 'string') {
-      answerText = ans;
-    } else if (ans && typeof ans === 'object') {
-      answerText =
-        (typeof ans.text === 'string' && ans.text) ||
-        (typeof ans.content === 'string' && ans.content) ||
-        (typeof ans.summary === 'string' && ans.summary) ||
-        (typeof ans.message === 'string' && ans.message) ||
-        (typeof ans.answer === 'string' ? ans.answer : '') ||
-        '';
-      if (typeof ans.confidence === 'number') confidence = ans.confidence;
-      if (Array.isArray(ans.follow_up_questions)) followUps = [...ans.follow_up_questions];
-      if (Array.isArray(ans.citations)) citations.push(...ans.citations);
-    }
-
-    if (!answerText) {
-      answerText =
-        (typeof root.summary === 'string' && root.summary) ||
-        (typeof root.text === 'string' && root.text) ||
-        '';
-    }
-
-    const sources: KBSearchResult[] =
-      citations.length > 0
-        ? citations.map((c: any, idx: number) =>
-            this.mapKbSearchItem(
-              {
-                ...c,
-                id: c.id ?? c.url ?? idx,
-                title: c.title || c.name || '',
-                content: c.snippet || c.text || c.content || '',
-                platform: c.domain || c.source,
-                score: c.trust_score ?? c.score ?? 0,
-              },
-              idx,
-            ),
-          )
-        : this.normalizeAiSearchSources(root);
-
-    if (followUps.length === 0 && Array.isArray(root.follow_up_questions)) followUps = [...root.follow_up_questions];
-    if (followUps.length === 0 && Array.isArray(data.follow_up_questions)) followUps = [...data.follow_up_questions];
-    if (followUps.length === 0 && Array.isArray(data.follow_ups)) followUps = [...data.follow_ups];
-
-    if (confidence === undefined && typeof root.confidence === 'number') confidence = root.confidence;
-    if (confidence === undefined && typeof data.confidence === 'number') confidence = data.confidence;
-
-    return { answer: answerText, sources, followUps, confidence };
-  }
-
-  /** SSE 路径：未配置时默认 /search/stream；设为 false/off 则仅用同步 /search */
-  private getAiSearchSsePath(): string | null {
-    const v = this.config.get<string>('AI_SEARCH_SSE_PATH');
-    if (v === 'false' || v === '0' || v === 'off') return null;
-    const t = (v === undefined || v === null ? '/search/stream' : String(v)).trim();
-    if (!t || t === 'false') return null;
-    return t.startsWith('/') ? t : `/${t}`;
-  }
-
-  /**
-   * aisousuo POST /api/search/stream
-   * 事件：cache_hit, decomposed, expanded, round_*, llm_started, llm_token, result, audit
-   */
-  private async consumeAisousuoSearchSse(
-    stream: NodeJS.ReadableStream,
-    sideQueue: KbSideQueue,
-  ): Promise<{
-    answer: string;
-    sources: KBSearchResult[];
-    followUps: string[];
-    confidence?: number;
-  }> {
-    let buffer = '';
-    let fullLlm = '';
-    let resultPayload: any = null;
-    const splitSseBlocks = (input: string): { blocks: string[]; rest: string } => {
-      const blocks: string[] = [];
-      let rest = input;
-      while (true) {
-        const m = rest.match(/\r?\n\r?\n/);
-        if (!m || m.index === undefined) break;
-        blocks.push(rest.slice(0, m.index));
-        rest = rest.slice(m.index + m[0].length);
-      }
-      return { blocks, rest };
-    };
-
-    const statusEvents = new Set([
-      'cache_hit',
-      'decomposed',
-      'expanded',
-      'round_started',
-      'round_finished',
-      'llm_started',
-      'audit',
-    ]);
-
-    const handleNamedEvent = (eventName: string, dataRaw: string) => {
-      if (!dataRaw) return;
-      let j: any;
-      try {
-        j = JSON.parse(dataRaw);
-      } catch {
-        return;
-      }
-      const ev = (eventName || j.event || j.type || '').trim();
-      if (ev === 'llm_token') {
-        const t = j.token ?? j.text ?? j.delta ?? j.content ?? '';
-        if (typeof t === 'string' && t) {
-          fullLlm += t;
-          sideQueue.push({ type: 'ai_search_token', text: t });
-        }
-        return;
-      }
-      if (ev === 'result') {
-        resultPayload = j.result !== undefined ? j.result : j.payload !== undefined ? j.payload : j;
-        return;
-      }
-      if (statusEvents.has(ev)) {
-        sideQueue.push({ type: 'status', phase: 'ai_search_sse', detail: ev, tool: 'external_ai_search' });
-      }
-    };
-
-    const parseBlock = (block: string) => {
-      if (!block.trim()) return;
-        let eventName = '';
-        const dataLines: string[] = [];
-      for (const line of block.split(/\r?\n/)) {
-          const l = line.replace(/\r$/, '');
-        if (l.trimStart().startsWith('event:')) eventName = l.trimStart().slice(6).trim();
-        else if (l.trimStart().startsWith('data:')) dataLines.push(l.trimStart().slice(5).trim());
-        }
-        const dataRaw = dataLines.join('\n').trim();
-        if (dataRaw) {
-          if (eventName) {
-            handleNamedEvent(eventName, dataRaw);
-          } else {
-            try {
-              const j = JSON.parse(dataRaw);
-              const ev = String(j.event || j.type || '').trim();
-              if (!ev) {
-                handleNamedEvent('result', dataRaw);
-              } else if (j.data !== undefined) {
-                handleNamedEvent(ev, typeof j.data === 'string' ? j.data : JSON.stringify(j.data));
-              } else {
-                handleNamedEvent(ev, dataRaw);
-              }
-            } catch {
-              /* ignore non-JSON data line */
-            }
-          }
-        }
-    };
-
-    for await (const chunk of stream as AsyncIterable<Buffer | string>) {
-      buffer += typeof chunk === 'string' ? chunk : chunk.toString();
-      const { blocks, rest } = splitSseBlocks(buffer);
-      buffer = rest;
-      for (const block of blocks) parseBlock(block);
-    }
-    if (buffer.trim()) parseBlock(buffer);
-
-    const mapped = resultPayload
-      ? this.mapAisousuoSearchResponse(resultPayload)
-      : { answer: '', sources: [] as KBSearchResult[], followUps: [] as string[], confidence: undefined as number | undefined };
-    if (!mapped.answer?.trim() && fullLlm.trim()) mapped.answer = fullLlm;
-    return mapped;
-  }
-
   private getAiSearchDepth(depth?: AiSearchDepth): AiSearchDepth {
-    return depth === 'quick' ? 'quick' : 'deep';
+    if (depth === 'deep') return 'deep';
+    return 'fast';
   }
 
-  private getAiSearchTopK(depth: AiSearchDepth): number {
-    if (depth === 'quick') {
-      return Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES_QUICK') || 1) || 1;
+  private buildJinaHeaders() {
+    return {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      ...(this.jinaApiKey ? { Authorization: `Bearer ${this.jinaApiKey}` } : {}),
+    };
+  }
+
+  private extractJinaMessage(raw: string): any | null {
+    let last: any = null;
+    for (const line of raw.split(/\r?\n/)) {
+      const s = line.trim();
+      if (!s.startsWith('data:')) continue;
+      const p = s.slice(5).trim();
+      try {
+        const j = JSON.parse(p);
+        if (j?.jsonrpc === '2.0') last = j;
+      } catch {
+        /* ignore */
+      }
     }
-    return Number(this.config.get<string>('AI_SEARCH_TOP_K_PAGES') || 3) || 3;
+    return last;
   }
 
-  private getAiSearchTimeoutMs(depth: AiSearchDepth): number {
-    if (depth === 'quick') {
-      return Number(this.config.get<string>('AI_SEARCH_TIMEOUT_MS_QUICK') || 15000) || 15000;
+  private async callJinaMcp(method: string, params: Record<string, any>) {
+    const payload = { jsonrpc: '2.0', id: randomUUID(), method, params };
+    const { data } = await axios.post(this.jinaMcpUrl, payload, {
+      timeout: 30000,
+      responseType: 'text',
+      headers: this.buildJinaHeaders(),
+    });
+    const msg = this.extractJinaMessage(typeof data === 'string' ? data : String(data ?? ''));
+    if (!msg) throw new Error('Jina MCP 响应为空');
+    if (msg.error) throw new Error(`Jina MCP ${method} 失败: ${msg.error?.message || 'unknown error'}`);
+    return msg.result;
+  }
+
+  private extractJinaToolText(result: any): string {
+    const parts = Array.isArray(result?.content) ? result.content : [];
+    return parts
+      .map((p: any) => (p?.type === 'text' && typeof p?.text === 'string' ? p.text : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+  }
+
+  private extractSourcesFromMarkdown(text: string): KBSearchResult[] {
+    const out: KBSearchResult[] = [];
+    const seen = new Set<string>();
+    const mdRe = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = mdRe.exec(text)) !== null) {
+      const url = m[2];
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ id: String(out.length), title: m[1] || 'Web', content: '', score: 1, url });
+      if (out.length >= 24) return out;
     }
-    return Number(this.config.get<string>('AI_SEARCH_TIMEOUT_MS') || 120000) || 120000;
+    const urlRe = /\bhttps?:\/\/[^\s\])"'<>]+/g;
+    let u: RegExpExecArray | null;
+    while ((u = urlRe.exec(text)) !== null) {
+      const url = u[0].replace(/[.,;:)]+$/g, '');
+      if (seen.has(url)) continue;
+      seen.add(url);
+      out.push({ id: String(out.length), title: 'Web', content: '', score: 0.5, url });
+      if (out.length >= 24) break;
+    }
+    return out;
   }
 
-  private toAisouSearchMode(depth: AiSearchDepth): 'fast' | 'deep' {
-    return depth === 'quick' ? 'fast' : 'deep';
+  private async jinaToolCall(name: string, args: Record<string, any>) {
+    const res = await this.callJinaMcp('tools/call', { name, arguments: args });
+    const text = this.extractJinaToolText(res);
+    return { text, raw: res };
+  }
+
+  private parseExpandedQueries(text: string, fallback: string): string[] {
+    const t = text.trim();
+    if (!t) return [fallback];
+    try {
+      const j = JSON.parse(t);
+      if (Array.isArray(j)) {
+        const qs: string[] = j.map((x) => String(x).trim()).filter(Boolean);
+        if (qs.length) return [...new Set(qs)].slice(0, 5);
+      }
+      if (j?.queries && Array.isArray(j.queries)) {
+        const qs: string[] = j.queries.map((x: any) => String(x).trim()).filter(Boolean);
+        if (qs.length) return [...new Set(qs)].slice(0, 5);
+      }
+    } catch {
+      /* non-json text */
+    }
+    const qs = t
+      .split('\n')
+      .map((x) => x.replace(/^\s*[\d\-\*\.)]+\s*/, '').trim())
+      .filter((x) => x.length > 3 && !/^error:/i.test(x));
+    return qs.length ? [...new Set(qs)].slice(0, 5) : [fallback];
   }
 
   async aiSearch(query: string, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
-    const mode = this.toAisouSearchMode(d);
+    if (!this.jinaApiKey) {
+      this.logger.warn(`AI 搜索调用失败(${d}): 缺少 JINA_API_KEY`);
+      return { answer: '', sources: [], followUps: [], confidence: undefined };
+    }
     try {
-      const ssePath = this.getAiSearchSsePath() || '/search/stream';
-      const base = this.aiSearchBaseUrl.replace(/\/$/, '');
-      const url = `${base}${ssePath.startsWith('/') ? ssePath : `/${ssePath}`}`;
-      const topK = this.getAiSearchTopK(d);
-      const { data: stream } = await axios.post(
-        url,
-        { query, top_k_pages: topK, search_mode: mode },
-        { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
-      );
-      return await this.consumeAisousuoSearchSse(stream, new KbSideQueue());
+      if (d === 'fast') {
+        const num = Math.max(1, Math.min(20, Number(this.config.get<string>('JINA_SEARCH_NUM_FAST') || 8)));
+        const { text } = await this.jinaToolCall('search_web', { query, num, hl: 'zh-cn' });
+        return { answer: text, sources: this.extractSourcesFromMarkdown(text), followUps: [], confidence: undefined };
+      }
+      const expanded = await this.jinaToolCall('expand_query', { query });
+      const expandedQueries = this.parseExpandedQueries(expanded.text, query);
+      const searches = expandedQueries.slice(0, 5).map((q) => ({
+        query: q,
+        num: Math.max(3, Math.min(20, Number(this.config.get<string>('JINA_SEARCH_NUM_DEEP') || 10))),
+        hl: 'zh-cn',
+      }));
+      const parallel = await this.jinaToolCall('parallel_search_web', {
+        searches,
+        timeout: Math.max(10000, Math.min(90000, Number(this.config.get<string>('JINA_PARALLEL_TIMEOUT_MS') || 30000))),
+      });
+      return {
+        answer: parallel.text || expanded.text,
+        sources: this.extractSourcesFromMarkdown(parallel.text || expanded.text),
+        followUps: [],
+        confidence: undefined,
+      };
     } catch (err: any) {
       this.logger.warn(`AI 搜索调用失败(${d}): ${err.message}`);
       return { answer: '', sources: [], followUps: [], confidence: undefined };
@@ -1066,30 +959,57 @@ export class KnowledgeBaseService {
     return `\n▸ 工具 ${name}${extra ? `：${extra}` : ''}\n`;
   }
 
-  /**
-   * 混合模式下统一走 aisousuo /search/stream（与 AI_SEARCH_SSE_PATH，默认 /search/stream）；
-   * quick/deep 都优先流式，失败时回退到“无事件流式调用”（仍是 /search/stream）。
-   */
   private async aiSearchWithOptionalSse(query: string, sideQueue: KbSideQueue, depth?: AiSearchDepth) {
     const d = this.getAiSearchDepth(depth);
-    const mode = this.toAisouSearchMode(d);
-    const ssePath = this.getAiSearchSsePath();
-    if (ssePath) {
-      try {
-        const base = this.aiSearchBaseUrl.replace(/\/$/, '');
-        const url = `${base}${ssePath}`;
-        const topK = this.getAiSearchTopK(d);
-        const { data: stream } = await axios.post(
-          url,
-          { query, top_k_pages: topK, search_mode: mode },
-          { responseType: 'stream', timeout: this.getAiSearchTimeoutMs(d) },
-        );
-        return await this.consumeAisousuoSearchSse(stream, sideQueue);
-      } catch (err: any) {
-        this.logger.warn(`AI Search SSE 失败(${d})，回退无事件流式调用: ${err?.message}`);
-      }
+    sideQueue.push({ type: 'status', phase: 'jina_initialize', detail: 'start', tool: 'jina_mcp' });
+    try {
+      await this.callJinaMcp('initialize', {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'gongdan-ticket-system', version: '1.0' },
+      });
+      sideQueue.push({ type: 'status', phase: 'jina_initialize', detail: 'done', tool: 'jina_mcp' });
+    } catch (e: any) {
+      sideQueue.push({ type: 'status', phase: 'jina_initialize', detail: `error:${e?.message || 'init failed'}`, tool: 'jina_mcp' });
+      return this.aiSearch(query, d);
     }
-    return this.aiSearch(query, d);
+
+    if (d === 'fast') {
+      sideQueue.push({ type: 'llm_think', text: '\n▸ 外部检索（Fast）：单轮 Web 搜索，优先时延。\n' });
+      sideQueue.push({ type: 'status', phase: 'jina_fast_search', detail: 'start', tool: 'search_web' });
+      const res = await this.aiSearch(query, 'fast');
+      sideQueue.push({ type: 'status', phase: 'jina_fast_search', detail: 'done', tool: 'search_web' });
+      return res;
+    }
+
+    sideQueue.push({ type: 'llm_think', text: '\n▸ 外部检索（Deep）：查询扩展 -> 并行搜索 -> 深度重排。\n' });
+    sideQueue.push({ type: 'status', phase: 'deep_expand_query', detail: 'start', tool: 'expand_query' });
+    let expandedQueries: string[] = [query];
+    try {
+      const ex = await this.jinaToolCall('expand_query', { query });
+      expandedQueries = this.parseExpandedQueries(ex.text, query);
+      sideQueue.push({ type: 'llm_think', text: `\n▸ Deep 扩展子查询：${expandedQueries.slice(0, 5).join('；')}\n` });
+    } finally {
+      sideQueue.push({ type: 'status', phase: 'deep_expand_query', detail: 'done', tool: 'expand_query' });
+    }
+
+    sideQueue.push({ type: 'status', phase: 'deep_parallel_search', detail: 'start', tool: 'parallel_search_web' });
+    let deepText = '';
+    try {
+      const searches = expandedQueries.slice(0, 5).map((q) => ({
+        query: q,
+        num: Math.max(3, Math.min(20, Number(this.config.get<string>('JINA_SEARCH_NUM_DEEP') || 10))),
+        hl: 'zh-cn',
+      }));
+      const ps = await this.jinaToolCall('parallel_search_web', {
+        searches,
+        timeout: Math.max(10000, Math.min(90000, Number(this.config.get<string>('JINA_PARALLEL_TIMEOUT_MS') || 30000))),
+      });
+      deepText = ps.text;
+    } finally {
+      sideQueue.push({ type: 'status', phase: 'deep_parallel_search', detail: 'done', tool: 'parallel_search_web' });
+    }
+    return { answer: deepText, sources: this.extractSourcesFromMarkdown(deepText), followUps: [], confidence: undefined };
   }
 
   /** 混合模式写入 system prompt，供模型综合（避免仅靠工具调用时模型跳过外部检索） */
@@ -1329,6 +1249,55 @@ export class KnowledgeBaseService {
     ].join('\n');
   }
 
+  private mergeSourcesByRatio(internal: KBSearchResult[], external: KBSearchResult[], internalRatio = 0.55, maxTotal = 16) {
+    const iTarget = Math.max(1, Math.round(maxTotal * internalRatio));
+    const eTarget = Math.max(1, maxTotal - iTarget);
+    const picked = [...(internal || []).slice(0, iTarget), ...(external || []).slice(0, eTarget)];
+    const seen = new Set<string>();
+    const out: KBSearchResult[] = [];
+    for (const s of picked) {
+      const key = (s.url || `${s.title}::${s.content}`).slice(0, 400);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+      if (out.length >= maxTotal) break;
+    }
+    return out;
+  }
+
+  private async rerankForDeep(query: string, sources: KBSearchResult[], sideQueue?: KbSideQueue): Promise<KBSearchResult[]> {
+    if (!sources.length) return [];
+    sideQueue?.push({ type: 'status', phase: 'deep_rerank', detail: 'start', tool: 'sort_by_relevance' });
+    try {
+      const documents = sources.map((s) => ({
+        text: [s.title, s.content, s.url].filter(Boolean).join('\n'),
+        metadata: { id: s.id, title: s.title, url: s.url },
+      }));
+      const { text } = await this.jinaToolCall('sort_by_relevance', {
+        query,
+        documents,
+        top_n: Math.min(12, documents.length),
+      });
+      const urlsInOrder: string[] = [];
+      const mdRe = /\((https?:\/\/[^)\s]+)\)/g;
+      let m: RegExpExecArray | null;
+      while ((m = mdRe.exec(text)) !== null) urlsInOrder.push(m[1]);
+      if (!urlsInOrder.length) return sources;
+      const rankMap = new Map<string, number>();
+      urlsInOrder.forEach((u, i) => rankMap.set(u, i));
+      return [...sources].sort((a, b) => {
+        const ar = rankMap.get(a.url || '') ?? 10_000;
+        const br = rankMap.get(b.url || '') ?? 10_000;
+        return ar - br;
+      });
+    } catch (e: any) {
+      this.logger.warn(`Deep rerank 失败，沿用原排序: ${e?.message || e}`);
+      return sources;
+    } finally {
+      sideQueue?.push({ type: 'status', phase: 'deep_rerank', detail: 'done', tool: 'sort_by_relevance' });
+    }
+  }
+
   private async *streamChatWithAgent(params: {
     sessionId: string;
     userId: string;
@@ -1437,22 +1406,29 @@ export class KnowledgeBaseService {
     if (usedSearchMode === 'hybrid') {
       sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'start', tool: 'internal_kb_search' });
       const intRes = await this.smartQuery(retrievalQuery, 5, historyForKb);
-      dedupeSource(intRes.sources || []);
       sideQueue.push({ type: 'status', phase: 'internal_kb', detail: 'done', tool: 'internal_kb_search' });
 
       sideQueue.push({ type: 'status', phase: 'ai_search', detail: 'start', tool: 'external_ai_search' });
       const extRes = await this.aiSearchWithOptionalSse(retrievalQuery, sideQueue, aiSearchDepth);
-      dedupeSource(extRes.sources || []);
       if (Array.isArray(extRes.followUps) && extRes.followUps.length > 0) {
         followUps.splice(0, followUps.length, ...extRes.followUps);
       }
       if (typeof extRes.confidence === 'number') confidence = extRes.confidence;
       if (!extRes.answer?.trim() && (!extRes.sources || extRes.sources.length === 0)) {
         this.logger.warn(
-          '混合模式流式：外部 AI 搜索无有效答案与来源，请检查 AI_SEARCH_AGENT_URL、出网与 AISousuo 可用性',
+          '混合模式流式：外部 AI 搜索无有效答案与来源，请检查 JINA_API_KEY、出网与 Jina MCP 可用性',
         );
       }
       sideQueue.push({ type: 'status', phase: 'ai_search', detail: 'done', tool: 'external_ai_search' });
+      const mergedSources = this.mergeSourcesByRatio(intRes.sources || [], extRes.sources || [], 0.55, 16);
+      const finalSources = this.getAiSearchDepth(aiSearchDepth) === 'deep'
+        ? await this.rerankForDeep(retrievalQuery, mergedSources, sideQueue)
+        : mergedSources;
+      dedupeSource(finalSources);
+      sideQueue.push({
+        type: 'llm_think',
+        text: `\n▸ 混合检索融合：内部 ${(intRes.sources || []).length} 条，外部 ${(extRes.sources || []).length} 条，按 55/45 融合后 ${finalSources.length} 条${this.getAiSearchDepth(aiSearchDepth) === 'deep' ? '，并执行深度重排' : ''}。\n`,
+      });
 
       const facts = this.formatHybridFactsForPrompt(intRes, extRes);
       toolsArr = [];
@@ -1741,14 +1717,17 @@ export class KnowledgeBaseService {
     if (searchMode === 'hybrid') {
       const noopQ = new KbSideQueue();
       const intRes = await this.smartQuery(retrievalQuery, 5, historyForKb);
-      dedupeSource(intRes.sources || []);
       let extRes: { answer: string; sources: KBSearchResult[]; followUps: string[]; confidence?: number };
       try {
         extRes = await this.aiSearchWithOptionalSse(retrievalQuery, noopQ, aiSearchDepth);
       } finally {
         noopQ.close();
       }
-      dedupeSource(extRes.sources || []);
+      const mergedSources = this.mergeSourcesByRatio(intRes.sources || [], extRes.sources || [], 0.55, 16);
+      const finalSources = this.getAiSearchDepth(aiSearchDepth) === 'deep'
+        ? await this.rerankForDeep(retrievalQuery, mergedSources)
+        : mergedSources;
+      dedupeSource(finalSources);
       if (Array.isArray(extRes.followUps) && extRes.followUps.length > 0) {
         followUps = extRes.followUps;
       }
@@ -1757,7 +1736,7 @@ export class KnowledgeBaseService {
       }
       if (!extRes.answer?.trim() && (!extRes.sources || extRes.sources.length === 0)) {
         this.logger.warn(
-          '混合模式（同步）：外部 AI 搜索无有效答案与来源，请检查 AI_SEARCH_AGENT_URL 与出网',
+          '混合模式（同步）：外部 AI 搜索无有效答案与来源，请检查 JINA_API_KEY、出网与 Jina MCP 可用性',
         );
       }
       tools = [];
