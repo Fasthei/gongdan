@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@ant-design/icons": "^5.0.0",
+    "@assistant-ui/react": "^0.12.21",
     "antd": "^5.0.0",
     "axios": "^1.6.0",
     "dayjs": "^1.11.0",
