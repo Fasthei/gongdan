@@ -53,30 +53,6 @@ export class KnowledgeBaseController {
     return this.kbService.smartQuery(body.question, body.topK, body.history);
   }
 
-  @Post('ai-search/fast')
-  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
-  async aiSearchFast(
-    @Body() body: { query: string; customerCode?: string },
-    @Request() req: any,
-  ) {
-    if (!body.query?.trim()) {
-      throw new ForbiddenException('query 不能为空');
-    }
-    if (req.user?.role === 'CUSTOMER') {
-      if (!body.customerCode) {
-        throw new ForbiddenException('客户使用知识库前请先输入客户编号');
-      }
-      const customer = await this.prisma.customer.findUnique({
-        where: { customerCode: body.customerCode },
-        select: { id: true },
-      });
-      if (!customer || customer.id !== req.user.customerId) {
-        throw new ForbiddenException('客户编号校验失败，无法使用知识库');
-      }
-    }
-    return this.kbService.aiSearch(body.query.trim(), 'fast');
-  }
-
   @Post('upload')
   @Roles('ADMIN')
   @UseInterceptors(FileInterceptor('file'))
@@ -111,52 +87,6 @@ export class KnowledgeBaseController {
       title: body.title?.trim(),
       format: body.format,
       numSlides: body.numSlides,
-    });
-  }
-
-  @Post('chat')
-  @Roles('ENGINEER', 'ADMIN', 'OPERATOR', 'CUSTOMER')
-  async chat(
-    @Body()     body: {
-      sessionId?: string;
-      message: string;
-      docContext?: string;
-      docName?: string;
-      customerCode?: string;
-      searchMode?: 'internal' | 'hybrid';
-      aiSearchDepth?: 'fast' | 'deep';
-      useSandbox?: boolean;
-      requestExample?: string;
-    },
-    @Request() req: any,
-  ) {
-    if (!body.message?.trim()) {
-      throw new ForbiddenException('消息不能为空');
-    }
-    if (req.user?.role === 'CUSTOMER') {
-      if (!body.customerCode) {
-        throw new ForbiddenException('客户使用知识库前请先输入客户编号');
-      }
-      const customer = await this.prisma.customer.findUnique({
-        where: { customerCode: body.customerCode },
-        select: { id: true },
-      });
-      if (!customer || customer.id !== req.user.customerId) {
-        throw new ForbiddenException('客户编号校验失败，无法使用知识库');
-      }
-    }
-    return this.kbService.chat({
-      sessionId: body.sessionId,
-      userId: req.user.id,
-      userRole: req.user.role,
-      customerCode: body.customerCode,
-      message: body.message.trim(),
-      docContext: body.docContext?.trim(),
-      docName: body.docName?.trim(),
-      searchMode: body.searchMode,
-      aiSearchDepth: body.aiSearchDepth,
-      useSandbox: body.useSandbox,
-      requestExample: body.requestExample?.trim(),
     });
   }
 

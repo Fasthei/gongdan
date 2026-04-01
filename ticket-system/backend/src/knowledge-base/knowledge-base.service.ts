@@ -1876,49 +1876,4 @@ export class KnowledgeBaseService {
     };
   }
 
-  async chat(params: {
-    sessionId?: string;
-    userId: string;
-    userRole: string;
-    customerCode?: string;
-    message: string;
-    searchMode?: 'internal' | 'hybrid';
-    aiSearchDepth?: AiSearchDepth;
-    useSandbox?: boolean;
-    requestExample?: string;
-    docContext?: string;
-    docName?: string;
-  }) {
-    const usedSearchMode: 'internal' | 'hybrid' = params.searchMode === 'hybrid' ? 'hybrid' : 'internal';
-    const sessionId = await this.getOrCreateSession(params);
-    const history = await this.getSessionMessages(sessionId, params.userId);
-    await this.addMessage(sessionId, 'user', params.message, usedSearchMode);
-
-    const agentResult = await this.buildAgentAnswer({
-      sessionId,
-      userId: params.userId,
-      question: params.message,
-      history: history.slice(-10).map((h) => ({ role: h.role, content: h.content })),
-      searchMode: usedSearchMode,
-      aiSearchDepth: params.aiSearchDepth,
-      useSandbox: params.useSandbox,
-      requestExample: params.requestExample,
-      docContext: params.docContext,
-      docName: params.docName,
-    });
-    const answer = agentResult.answer;
-
-    await this.addMessage(sessionId, 'assistant', answer, usedSearchMode);
-    const messages = await this.getSessionMessages(sessionId, params.userId);
-
-    return {
-      sessionId,
-      answer,
-      sources: agentResult.sources || [],
-      followUps: agentResult.followUps || [],
-      confidence: agentResult.confidence,
-      usedSearchMode,
-      messages,
-    };
-  }
 }
