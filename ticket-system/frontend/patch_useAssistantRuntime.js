@@ -1,4 +1,11 @@
-import { useLocalRuntime, ChatModelAdapter, ThreadAssistantMessagePart } from '@assistant-ui/react';
+const fs = require('fs');
+const path = require('path');
+
+const filePath = path.join(__dirname, 'src/pages/common/KnowledgeBaseChat/useAssistantRuntime.tsx');
+let content = fs.readFileSync(filePath, 'utf8');
+
+// Replace the imports and the hook implementation
+content = `import { useLocalRuntime, ChatModelAdapter, ThreadAssistantMessagePart } from '@assistant-ui/react';
 import { useMemo, useEffect } from 'react';
 import { KbChatContextType } from './useKbChat';
 import { apiUrl } from '../../../config/apiBase';
@@ -49,20 +56,20 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
           return tickets
             .map((t, idx) =>
               [
-                `### 工单 ${idx + 1}`,
-                `工单编号: ${t.ticketNumber || t.id || ''}`,
-                `状态: ${t.status || ''}`,
-                `平台: ${t.platform || ''}`,
-                `模型: ${t.modelUsed || ''}`,
-                t.framework ? `框架/应用: ${t.framework}` : '',
-                t.networkEnv ? `网络环境: ${t.networkEnv}` : '',
-                t.accountInfo ? `账号信息: ${t.accountInfo}` : '',
-                `问题描述:\n${t.description || ''}`,
+                \`### 工单 \${idx + 1}\`,
+                \`工单编号: \${t.ticketNumber || t.id || ''}\`,
+                \`状态: \${t.status || ''}\`,
+                \`平台: \${t.platform || ''}\`,
+                \`模型: \${t.modelUsed || ''}\`,
+                t.framework ? \`框架/应用: \${t.framework}\` : '',
+                t.networkEnv ? \`网络环境: \${t.networkEnv}\` : '',
+                t.accountInfo ? \`账号信息: \${t.accountInfo}\` : '',
+                \`问题描述:\\n\${t.description || ''}\`,
               ]
                 .filter(Boolean)
-                .join('\n')
+                .join('\\n')
             )
-            .join('\n\n');
+            .join('\\n\\n');
         };
 
         const buildSandboxRequestFromTickets = (tickets: any[]): string => {
@@ -70,12 +77,12 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
             .map((t) => (typeof t?.requestExample === 'string' ? t.requestExample.trim() : ''))
             .filter(Boolean);
           if (!samples.length) return '';
-          return samples.join('\n\n# ---- 来自其他工单请求示例 ----\n\n');
+          return samples.join('\\n\\n# ---- 来自其他工单请求示例 ----\\n\\n');
         };
 
         const ticketContext = buildTicketContext(selectedTickets);
         const mergedMessage = ticketContext
-          ? `${userText}\n\n---\n【关联工单明细】\n${ticketContext}`
+          ? \`\${userText}\\n\\n---\\n【关联工单明细】\\n\${ticketContext}\`
           : userText;
         const ticketSandboxRequest = buildSandboxRequestFromTickets(selectedTickets);
         const finalRequestExample = requestExampleText.trim() || (sandboxMode ? ticketSandboxRequest : '');
@@ -85,7 +92,7 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
         const fetchWithAuthStream = async (url: string, init: RequestInit): Promise<Response> => {
           let token = localStorage.getItem('accessToken');
           const headers = new Headers(init.headers);
-          if (token) headers.set('Authorization', `Bearer ${token}`);
+          if (token) headers.set('Authorization', \`Bearer \${token}\`);
           let res = await fetch(url, { ...init, headers });
           if (res.status === 401) {
             const rt = localStorage.getItem('refreshToken');
@@ -99,7 +106,7 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
                 const d = await rr.json();
                 localStorage.setItem('accessToken', d.accessToken);
                 token = d.accessToken;
-                headers.set('Authorization', `Bearer ${token}`);
+                headers.set('Authorization', \`Bearer \${token}\`);
                 res = await fetch(url, { ...init, headers });
               }
             }
@@ -138,7 +145,7 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
           });
 
           if (!res.ok) {
-            throw new Error(`知识库对话失败（HTTP ${res.status}）`);
+            throw new Error(\`知识库对话失败（HTTP \${res.status}）\`);
           }
 
           const reader = res.body?.getReader();
@@ -154,7 +161,7 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
             const blocks: string[] = [];
             let rest = input;
             while (true) {
-              const m = rest.match(/\r?\n\r?\n/);
+              const m = rest.match(/\\r?\\n\\r?\\n/);
               if (!m || m.index === undefined) break;
               const idx = m.index;
               blocks.push(rest.slice(0, idx));
@@ -216,12 +223,12 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
             buf = rest;
 
             for (const block of blocks) {
-              const lines = block.split(/\r?\n/).map((l) => l.replace(/\r$/, ''));
+              const lines = block.split(/\\r?\\n/).map((l) => l.replace(/\\r$/, ''));
               const dataLines = lines.filter((l) => l.trimStart().startsWith('data:'));
               if (!dataLines.length) continue;
               const raw = dataLines
-                .map((l) => l.trimStart().replace(/^data:\s?/i, '').trim())
-                .join('\n')
+                .map((l) => l.trimStart().replace(/^data:\\s?/i, '').trim())
+                .join('\\n')
                 .trim();
 
               if (!raw) continue;
@@ -277,8 +284,8 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
                   setRetrievalStatus(retrievalState);
                   if (json.detail === 'start' && !aiSearchThinkEventsRef.current.has('deep_rerank')) {
                     aiSearchThinkEventsRef.current.add('deep_rerank');
-                    accReasoning += '\n▸ Deep 重排：根据问题语义对内外部候选来源重新排序。\n';
-                    appendThinkDelta('\n▸ Deep 重排：根据问题语义对内外部候选来源重新排序。\n');
+                    accReasoning += '\\n▸ Deep 重排：根据问题语义对内外部候选来源重新排序。\\n';
+                    appendThinkDelta('\\n▸ Deep 重排：根据问题语义对内外部候选来源重新排序。\\n');
                   }
                 } else {
                   retrievalState = [json.phase, json.detail, json.tool].filter(Boolean).join(' · ') || '检索中…';
@@ -293,7 +300,7 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
                   const currentThink = llmThinkRef.current.trim();
                   setThinkHistory((prev: any[]) => [
                     {
-                      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                      id: \`\${Date.now()}-\${Math.random().toString(36).slice(2, 8)}\`,
                       question: userText,
                       think: currentThink,
                       searchMode: roundMode,
@@ -331,9 +338,9 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
   // Convert initial chat to ThreadMessage[]
   const initialMessages = useMemo(() => {
     return (chat as any[]).map((msg, idx) => ({
-      id: msg.id || `msg-${idx}`,
+      id: msg.id || \`msg-\${idx}\`,
       role: msg.role,
-      content: [{ type: 'text', text: msg.content || '' }] as any,
+      content: [{ type: 'text', text: msg.content || '' }],
       metadata: { custom: { searchMode: msg.searchMode } }
     }));
   }, []); // Only run once on mount
@@ -345,7 +352,7 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
     return runtime.thread.subscribe(() => {
       const messages = runtime.thread.getState().messages;
       const newChat = messages.map(m => {
-        const textContent = (m.content.find((c: any) => c.type === 'text' && c.text) as any)?.text || '';
+        const textContent = m.content.find((c: any) => c.type === 'text')?.text || '';
         return {
           id: m.id,
           role: m.role,
@@ -360,3 +367,6 @@ export function useAssistantRuntime(ctx: KbChatContextType) {
 
   return runtime;
 }
+`;
+
+fs.writeFileSync(filePath, content, 'utf8');
