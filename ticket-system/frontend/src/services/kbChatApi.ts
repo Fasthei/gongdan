@@ -1,15 +1,26 @@
-import { apiUrl } from '../config/apiBase';
+import { getApiOrigin } from '../config/apiBase';
 import { KbEvent } from '../types/kbChat';
 
 let cachedBase = '';
 
 function kbBaseCandidates() {
   const envOrigin = (import.meta.env.VITE_KB_CHAT_API_ORIGIN || '').trim().replace(/\/$/, '');
+  const appOrigin = (getApiOrigin() || '').trim().replace(/\/$/, '');
   const defaults = [
     envOrigin,
+    appOrigin,
     'https://aichatgongdan-dna6ghavchd9h6e0.eastasia-01.azurewebsites.net',
   ].filter(Boolean);
   return Array.from(new Set(defaults));
+}
+
+function withAuthHeaders(init?: RequestInit): RequestInit {
+  const accessToken = localStorage.getItem('accessToken');
+  const headers = new Headers(init?.headers || {});
+  if (accessToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+  return { ...init, headers };
 }
 
 async function fetchKb(path: string, init?: RequestInit) {
@@ -17,7 +28,7 @@ async function fetchKb(path: string, init?: RequestInit) {
   let lastError: any = null;
   for (const base of tries) {
     try {
-      const res = await fetch(`${base}${path}`, init);
+      const res = await fetch(`${base}${path}`, withAuthHeaders(init));
       const ct = res.headers.get('content-type') || '';
       const looksJson = ct.includes('application/json');
       if (res.ok && looksJson) {
@@ -109,20 +120,24 @@ export async function streamChat(
   payload: { session_id?: string; prompt: string; branch_id: string; metadata?: Record<string, any> },
   onEvent: (event: KbEvent) => void
 ) {
-  const accessToken = localStorage.getItem('accessToken');
+  if (!payload.session_id) {
+    throw new Error('session_id is required');
+  }
   const base = cachedBase || kbBaseCandidates()[0];
-  const response = await fetch(`${base}/threads/${payload.session_id}/runs/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-    },
-    body: JSON.stringify({
-      assistant_id: 'kb-chat-agent',
-      input: { messages: [{ role: 'user', content: payload.prompt }] },
-      stream_mode: ['messages', 'updates', 'values'],
+  const response = await fetch(
+    `${base}/threads/${payload.session_id}/runs/stream`,
+    withAuthHeaders({
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        assistant_id: 'kb-chat-agent',
+        input: { messages: [{ role: 'user', content: payload.prompt }] },
+        stream_mode: ['messages', 'updates', 'values'],
+      }),
     }),
-  });
+  );
 
   if (!response.ok || !response.body) {
     throw new Error(`stream failed: ${response.status}`);
