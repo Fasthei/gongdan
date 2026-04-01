@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Alert,
+  Avatar,
   Badge,
   Button,
   Card,
@@ -20,8 +21,10 @@ import {
   Spin,
   Tag,
   Typography,
+  Tooltip,
   message,
 } from 'antd';
+import { BulbOutlined, RobotOutlined, ToolOutlined, UserOutlined } from '@ant-design/icons';
 import {
   createBranch,
   createSession,
@@ -44,7 +47,7 @@ import { ChatMessage, Citation, KbEvent, UiPayload } from '../../types/kbChat';
 import { renderUiPayload } from '../../components/kb/uiRegistry';
 
 const { TextArea } = Input;
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 interface QueueItem {
   id: string;
@@ -76,6 +79,14 @@ export default function KnowledgeBaseChat() {
   const [citationGroup, setCitationGroup] = React.useState<'ALL' | 'Web' | 'KB' | 'Internal'>('ALL');
   const [renameModalOpen, setRenameModalOpen] = React.useState(false);
   const [renameValue, setRenameValue] = React.useState('');
+
+  const bubbleStyle = (role: string): React.CSSProperties => ({
+    background: role === 'user' ? '#e6f4ff' : '#ffffff',
+    border: role === 'user' ? '1px solid #91caff' : '1px solid #e5e7eb',
+    borderRadius: 14,
+    padding: 12,
+    boxShadow: role === 'user' ? 'none' : '0 2px 8px rgba(15, 23, 42, 0.06)',
+  });
 
   const init = React.useCallback(async () => {
     try {
@@ -278,9 +289,9 @@ export default function KnowledgeBaseChat() {
   const filteredCitations = citations.filter((c) => (citationGroup === 'ALL' ? true : c.sourceType === citationGroup));
 
   return (
-    <Row gutter={16} style={{ padding: 16, height: '100%' }}>
+    <Row gutter={16} style={{ padding: 16, height: 'calc(100vh - 88px)', background: '#f6f8fb' }}>
       <Col span={5}>
-        <Card title="会话 / 分支" size="small">
+        <Card title="会话 / 分支" size="small" style={{ borderRadius: 14, height: '100%' }}>
           <Space direction="vertical" style={{ width: '100%' }}>
             <Button block onClick={async () => {
               const created = await createSession();
@@ -326,9 +337,9 @@ export default function KnowledgeBaseChat() {
 
       <Col span={13}>
         <Card
-          title="知识库对话"
+          title={<Space><RobotOutlined />知识库对话</Space>}
           extra={<Space><Tag>{stepText}</Tag><Tag color={streaming ? 'processing' : 'success'}>{streaming ? 'Streaming' : 'Idle'}</Tag></Space>}
-          style={{ height: '100%' }}
+          style={{ height: '100%', borderRadius: 14 }}
           bodyStyle={{ display: 'flex', flexDirection: 'column', gap: 12 }}
         >
           <Alert
@@ -337,32 +348,38 @@ export default function KnowledgeBaseChat() {
             message="已在现有前端页面启用：Markdown、Reasoning、Tool Calling、HITL、Branching、Time-travel、Structured Output、Message Queue、Join/Rejoin、Generative UI。"
           />
 
-          <div style={{ flex: 1, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 8, padding: 12 }}>
+          <div style={{ flex: 1, overflow: 'auto', border: '1px solid #e5e7eb', borderRadius: 12, padding: 12, background: '#fbfcfe' }}>
             {!messagesList.length ? (
               <Empty description="开始提问以生成对话" />
             ) : (
-              <Space direction="vertical" style={{ width: '100%' }}>
+              <Space direction="vertical" style={{ width: '100%' }} size={10}>
                 {messagesList.filter((m) => !m.deleted).map((m) => (
-                  <Card
-                    key={m.id}
-                    size="small"
-                    type="inner"
-                    title={`${m.role} · ${m.branch_id}`}
-                    extra={
-                      <Space>
-                        <Button size="small" onClick={() => void onCreateBranch(m.id)}>从此分支</Button>
-                        <Button size="small" danger onClick={() => void onDeleteMessage(m.id)}>删除</Button>
+                  <div key={m.id} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    <div style={{ maxWidth: '88%', width: 'fit-content' }}>
+                      <Space align="start">
+                        {m.role !== 'user' && <Avatar size="small" icon={<RobotOutlined />} style={{ background: '#f0f5ff', color: '#1d39c4' }} />}
+                        <div style={bubbleStyle(m.role)}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <Text type="secondary">{m.role === 'user' ? '你' : '助手'} · {m.branch_id}</Text>
+                            <Space size={4}>
+                              <Tooltip title="从此创建分支">
+                                <Button size="small" onClick={() => void onCreateBranch(m.id)}>分支</Button>
+                              </Tooltip>
+                              <Button size="small" danger onClick={() => void onDeleteMessage(m.id)}>删</Button>
+                            </Space>
+                          </div>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || '_生成中_'}</ReactMarkdown>
+                        </div>
+                        {m.role === 'user' && <Avatar size="small" icon={<UserOutlined />} style={{ background: '#1677ff', marginLeft: 8 }} />}
                       </Space>
-                    }
-                  >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || '_生成中_'}</ReactMarkdown>
-                  </Card>
+                    </div>
+                  </div>
                 ))}
               </Space>
             )}
           </div>
 
-          <Card size="small" title="思考摘要">
+          <Card size="small" title={<Space><BulbOutlined />思考摘要</Space>} style={{ borderRadius: 12 }}>
             <Text strong>{reasoningSummary || '暂无摘要'}</Text>
             <Collapse
               size="small"
@@ -374,7 +391,7 @@ export default function KnowledgeBaseChat() {
 
           <Collapse
             items={[
-              { key: 'tools', label: `工具状态 (${toolStates.length})`, children: <List size="small" dataSource={toolStates} renderItem={(x) => <List.Item>{x.name} · {x.status} · {x.step || '-'}</List.Item>} /> },
+              { key: 'tools', label: <Space><ToolOutlined />工具状态 ({toolStates.length})</Space>, children: <List size="small" dataSource={toolStates} renderItem={(x) => <List.Item>{x.name} · {x.status} · {x.step || '-'}</List.Item>} /> },
               {
                 key: 'structured',
                 label: `Structured / Generative UI (${structuredBlocks.length})`,
@@ -390,7 +407,7 @@ export default function KnowledgeBaseChat() {
             ]}
           />
 
-          <Space.Compact style={{ width: '100%' }}>
+          <Space.Compact style={{ width: '100%', background: '#fff', position: 'sticky', bottom: 0 }}>
             <TextArea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -405,7 +422,7 @@ export default function KnowledgeBaseChat() {
 
       <Col span={6}>
         <Space direction="vertical" style={{ width: '100%' }}>
-          <Card size="small" title="参考资料">
+          <Card size="small" title="参考资料" style={{ borderRadius: 14 }}>
             <Segmented
               size="small"
               options={[
@@ -437,7 +454,7 @@ export default function KnowledgeBaseChat() {
             )}
           </Card>
 
-          <Card size="small" title="Time-travel">
+          <Card size="small" title="Time-travel" style={{ borderRadius: 14 }}>
             <Space direction="vertical" style={{ width: '100%' }}>
               <Button onClick={() => void onLoadCheckpoints()} disabled={!currentRunId}>加载 Checkpoints</Button>
               <List
