@@ -20,6 +20,10 @@ param jwtRefreshSecret string
 @secure()
 param kbApiKey string
 
+@description('Jina MCP API Key')
+@secure()
+param jinaApiKey string
+
 @description('Teams Webhook URL')
 param teamsWebhookUrl string = ''
 
@@ -127,6 +131,11 @@ resource backendApp 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'AZURE_SERVICE_BUS_QUEUE_NAME', value: 'ticket-events' }
         { name: 'KB_AGENT_URL', value: 'https://agnetdoc-cve0guf5h8eggmej.southeastasia-01.azurewebsites.net' }
         { name: 'KB_AGENT_API_KEY', value: kbApiKey }
+        { name: 'JINA_MCP_URL', value: 'https://mcp.jina.ai/v1' }
+        { name: 'JINA_API_KEY', value: jinaApiKey }
+        { name: 'JINA_SEARCH_NUM_FAST', value: '8' }
+        { name: 'JINA_SEARCH_NUM_DEEP', value: '10' }
+        { name: 'JINA_PARALLEL_TIMEOUT_MS', value: '30000' }
         { name: 'TEAMS_WEBHOOK_URL', value: teamsWebhookUrl }
         { name: 'EXTERNAL_STATUS_API_URL', value: 'http://20.191.156.160/status/api' }
         { name: 'WEBSITE_RUN_FROM_PACKAGE', value: '1' }
