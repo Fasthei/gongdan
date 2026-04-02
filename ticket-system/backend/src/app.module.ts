@@ -9,8 +9,8 @@ import { EngineerModule } from './engineer/engineer.module';
 import { TicketModule } from './ticket/ticket.module';
 import { AttachmentModule } from './attachment/attachment.module';
 import { NotificationModule } from './notification/notification.module';
-import { KnowledgeBaseModule } from './knowledge-base/knowledge-base.module';
 import { StatusMonitorModule } from './status-monitor/status-monitor.module';
+import { ApiPermissionsModule } from './api-permissions/api-permissions.module';
 
 @Module({
   imports: [
@@ -23,8 +23,8 @@ import { StatusMonitorModule } from './status-monitor/status-monitor.module';
     TicketModule,
     AttachmentModule,
     NotificationModule,
-    KnowledgeBaseModule,
     StatusMonitorModule,
+    ApiPermissionsModule,
   ],
   controllers: [AppController],
 })

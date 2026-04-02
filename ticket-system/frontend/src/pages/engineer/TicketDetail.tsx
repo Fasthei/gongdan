@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Descriptions, Tag, Button, Space, Spin, Alert, List, Typography, Divider, message } from 'antd';
-import { ArrowLeftOutlined, BulbOutlined } from '@ant-design/icons';
+import { Card, Descriptions, Tag, Button, Space, Spin, Alert, Typography, Divider, message } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import dayjs from 'dayjs';
@@ -18,35 +18,14 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
 export default function EngineerTicketDetail() {
   const { id } = useParams<{ id: string }>();
   const [ticket, setTicket] = useState<any>(null);
-  const [kbResults, setKbResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [kbLoading, setKbLoading] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     api.get(`/tickets/${id}`).then(({ data }) => {
       setTicket(data.ticket || data);
-      if (data.knowledgeBase) setKbResults(data.knowledgeBase);
     }).finally(() => setLoading(false));
   }, [id]);
-
-
-  const searchKB = async () => {
-    if (!ticket) return;
-    setKbLoading(true);
-    try {
-      const { data } = await api.post('/knowledge-base/search', {
-        query: ticket.description,
-        platform: ticket.platform,
-        topK: 5,
-      });
-      setKbResults(data);
-    } catch {
-      message.warning('知识库搜索失败');
-    } finally {
-      setKbLoading(false);
-    }
-  };
 
   const handleStatusUpdate = async (newStatus: string) => {
     try {
@@ -121,31 +100,6 @@ export default function EngineerTicketDetail() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <Card
-            bordered={false}
-            title={<Space><BulbOutlined />知识库建议</Space>}
-            extra={<Button size="small" onClick={searchKB} loading={kbLoading}>搜索</Button>}
-          >
-              {kbResults.length === 0 ? (
-              <Text type="secondary">点击搜索获取相关知识条目</Text>
-            ) : (
-              <List
-                size="small"
-                dataSource={kbResults}
-                renderItem={(item: any) => (
-                  <List.Item>
-                    <div>
-                      <Text strong style={{ fontSize: 13 }}>{item.title}</Text>
-                      <Paragraph ellipsis={{ rows: 3 }} style={{ fontSize: 12, margin: '4px 0 0', color: '#666' }}>
-                        {item.content}
-                      </Paragraph>
-                    </div>
-                  </List.Item>
-                )}
-              />
-            )}
-          </Card>
-
           <TicketMessageBoard ticketId={ticket.id} ticketStatus={ticket.status} />
         </div>
       </div>

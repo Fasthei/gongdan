@@ -15,15 +15,6 @@ const OperatorDashboard = React.lazy(() => import('./pages/operator/Dashboard'))
 const EngineerDashboard = React.lazy(() => import('./pages/engineer/Dashboard'));
 const StatusBoard = React.lazy(() => import('./pages/operator/StatusBoard'));
 
-function KbChatDisabled() {
-  return (
-    <div style={{ padding: 40, maxWidth: 720, margin: '0 auto' }}>
-      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>WBChat Agent 已停用</div>
-      <div style={{ color: '#5f6368' }}>当前已对所有用户禁用知识库对话功能，请使用工单系统继续处理问题。</div>
-    </div>
-  );
-}
-
 function App() {
   return (
     <ConfigProvider
@@ -91,9 +82,6 @@ function App() {
 
               {/* 工程师路由 */}
               <Route path="/engineer/*" element={<PrivateRoute roles={['ENGINEER', 'ADMIN']}><EngineerDashboard /></PrivateRoute>} />
-
-              {/* 全角色WBChat Agent（已禁用） */}
-              <Route path="/kb-chat" element={<PrivateRoute roles={['CUSTOMER', 'OPERATOR', 'ENGINEER', 'ADMIN']}><KbChatDisabled /></PrivateRoute>} />
 
               <Route path="/unauthorized" element={<div style={{ padding: 40 }}>无权访问此页面</div>} />
               <Route path="*" element={<Navigate to="/login" replace />} />

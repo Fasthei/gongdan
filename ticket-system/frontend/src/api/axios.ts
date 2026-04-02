@@ -11,6 +11,19 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+let refreshInFlight: Promise<any> | null = null;
+async function refreshAccessToken(refreshToken: string) {
+  if (!refreshInFlight) {
+    refreshInFlight = axios
+      .post(apiUrl('/api/auth/refresh'), { refreshToken })
+      .then((res) => res.data)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 // 请求拦截器：自动附加 Token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('accessToken');
@@ -50,8 +63,9 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refreshToken');
       if (refreshToken) {
         try {
-          const { data } = await axios.post(apiUrl('/api/auth/refresh'), { refreshToken });
+          const data = await refreshAccessToken(refreshToken);
           localStorage.setItem('accessToken', data.accessToken);
+          original.headers = original.headers || {};
           original.headers.Authorization = `Bearer ${data.accessToken}`;
           return api(original);
         } catch {

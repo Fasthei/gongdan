@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import api from '../../api/axios';
 import TicketList from './TicketList';
 import TicketDetail from './TicketDetail';
+import ApiPermissionControl from './ApiPermissionControl';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -32,7 +33,10 @@ export default function EngineerDashboard() {
     { key: '/engineer', icon: <UnorderedListOutlined />, label: <Link to="/engineer">我的工单</Link> },
     { key: '/engineer/settings', icon: <SettingOutlined />, label: <Link to="/engineer/settings">设置</Link> },
     ...(user?.role === 'ADMIN'
-      ? [{ key: '/engineer/admin', icon: <SettingOutlined />, label: <Link to="/engineer/admin">管理员账户管理</Link> }]
+      ? [
+          { key: '/engineer/admin/api-permissions', icon: <SettingOutlined />, label: <Link to="/engineer/admin/api-permissions">API 权限控制</Link> },
+          { key: '/engineer/admin', icon: <SettingOutlined />, label: <Link to="/engineer/admin">管理员账户管理</Link> },
+        ]
       : []),
   ];
 
@@ -59,6 +63,7 @@ export default function EngineerDashboard() {
             <Route path="/tickets/:id" element={<TicketDetail />} />
             <Route path="/settings" element={<EngineerSettings />} />
             {user?.role === 'ADMIN' && <Route path="/admin" element={<AdminAccountSettings />} />}
+            {user?.role === 'ADMIN' && <Route path="/admin/api-permissions" element={<ApiPermissionControl />} />}
           </Routes>
         </Content>
       </Layout>
@@ -146,7 +151,6 @@ function AdminAccountSettings() {
   const [operatorForm] = Form.useForm();
   const [engLoading, setEngLoading] = React.useState(false);
   const [opLoading, setOpLoading] = React.useState(false);
-  const [kbLoading, setKbLoading] = React.useState(false);
   const [engineers, setEngineers] = React.useState<any[]>([]);
   const [operators, setOperators] = React.useState<any[]>([]);
   const [tableLoading, setTableLoading] = React.useState(false);
@@ -202,23 +206,6 @@ function AdminAccountSettings() {
     } finally {
       setOpLoading(false);
     }
-  };
-
-  const handleUploadKnowledge = async (file: File) => {
-    setKbLoading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      await api.post('/knowledge-base/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      message.success('知识库资料上传成功');
-    } catch (err: any) {
-      message.error(err.response?.data?.message || '知识库资料上传失败');
-    } finally {
-      setKbLoading(false);
-    }
-    return false;
   };
 
   const submitEdit = async () => {
@@ -410,17 +397,6 @@ function AdminAccountSettings() {
       />
 
       <Divider />
-
-      <Typography.Title level={5}>上传知识库资料</Typography.Title>
-      <input
-        type="file"
-        disabled={kbLoading}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void handleUploadKnowledge(f);
-          e.currentTarget.value = '';
-        }}
-      />
 
       <Modal
         title={editEngineer ? '修改工程师信息' : '修改运营账户信息'}

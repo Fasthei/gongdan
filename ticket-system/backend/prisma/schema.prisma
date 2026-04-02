@@ -188,3 +188,12 @@ model TicketMessage {
   @@index([ticketId])
   @@index([createdAt])
 }
+
+model ApiModulePermission {
+  moduleKey String   @id
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@index([enabled])
+}
