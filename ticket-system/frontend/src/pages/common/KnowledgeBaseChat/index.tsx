@@ -3,7 +3,8 @@ import { Layout, Input, Button, Typography, Space, Avatar, ConfigProvider, theme
 import {
   MenuOutlined, PlusOutlined, SearchOutlined, FolderOutlined,
   SendOutlined, SlidersOutlined, DatabaseOutlined, DownOutlined,
-  UserOutlined, RobotOutlined, EditOutlined, MessageOutlined, ToolOutlined, BulbOutlined
+  UserOutlined, RobotOutlined, EditOutlined, MessageOutlined, ToolOutlined, BulbOutlined,
+  ArrowLeftOutlined, BgColorsOutlined
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -18,10 +19,6 @@ import { renderUiPayload } from '../../../components/kb/uiRegistry';
 
 const { Sider, Content } = Layout;
 const { Text, Title } = Typography;
-
-const bgColor = '#000000';
-const sidebarBg = '#1e1f20';
-const textColor = '#e3e3e3';
 
 interface QueueItem {
   id: string;
@@ -56,6 +53,32 @@ export default function KnowledgeBaseChat() {
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [leftSiderCollapsed, setLeftSiderCollapsed] = useState(false);
+
+  // Theme support
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('kb-theme');
+    return saved ? saved === 'dark' : true;
+  });
+
+  const toggleTheme = () => {
+    const next = !isDarkMode;
+    setIsDarkMode(next);
+    localStorage.setItem('kb-theme', next ? 'dark' : 'light');
+  };
+
+  const bgColor = isDarkMode ? '#000000' : '#f6f8fb';
+  const sidebarBg = isDarkMode ? '#1e1f20' : '#ffffff';
+  const textColor = isDarkMode ? '#e3e3e3' : '#333333';
+  const borderColor = isDarkMode ? '#3c4043' : '#e5e7eb';
+  const containerBg = isDarkMode ? '#1e1f20' : '#fbfcfe';
+  const userBubbleBg = isDarkMode ? '#282a2c' : '#e6f4ff';
+  const userBubbleBorder = isDarkMode ? 'none' : '1px solid #91caff';
+  const userBubbleColor = isDarkMode ? '#e3e3e3' : '#000000';
+  const accentColor = isDarkMode ? '#a8c7fa' : '#1677ff';
+  const headerIconColor = isDarkMode ? '#e3e3e3' : '#5f6368';
+  const itemHoverBg = isDarkMode ? '#282a2c' : '#f1f3f4';
+  const inputContainerBg = isDarkMode ? '#1e1f20' : '#ffffff';
+  const titleColor = isDarkMode ? '#ffffff' : '#000000';
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -270,30 +293,30 @@ export default function KnowledgeBaseChat() {
   if (!contracts) return <Spin fullscreen />;
 
   return (
-    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorBgBase: bgColor, colorTextBase: textColor, colorBorder: '#3c4043' } }}>
+    <ConfigProvider theme={{ algorithm: isDarkMode ? theme.darkAlgorithm : theme.defaultAlgorithm, token: { colorBgBase: bgColor, colorTextBase: textColor, colorBorder: borderColor } }}>
       <Layout style={{ height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden', background: bgColor }}>
-        <Sider collapsed={leftSiderCollapsed} collapsedWidth={0} width={280} style={{ background: sidebarBg, padding: leftSiderCollapsed ? 0 : '16px 12px', display: 'flex', flexDirection: 'column' }}>
+        <Sider collapsed={leftSiderCollapsed} collapsedWidth={0} width={280} style={{ background: sidebarBg, padding: leftSiderCollapsed ? 0 : '16px 12px', display: 'flex', flexDirection: 'column', borderRight: `1px solid ${borderColor}` }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24, padding: '0 12px' }}>
-            <Button type="text" icon={<MenuOutlined />} onClick={() => setLeftSiderCollapsed(!leftSiderCollapsed)} style={{ color: '#e3e3e3', marginRight: 16 }} />
-            <span style={{ fontSize: 18, fontWeight: 500, color: '#fff' }}>Agent <Tag color="blue" style={{ borderRadius: 12, marginLeft: 8, background: '#1c2b41', color: '#a8c7fa', border: 'none' }}>KB</Tag></span>
+            <Button type="text" icon={<MenuOutlined />} onClick={() => setLeftSiderCollapsed(!leftSiderCollapsed)} style={{ color: headerIconColor, marginRight: 16 }} />
+            <span style={{ fontSize: 18, fontWeight: 500, color: titleColor }}>Agent <Tag color="blue" style={{ borderRadius: 12, marginLeft: 8, background: isDarkMode ? '#1c2b41' : '#e6f4ff', color: accentColor, border: 'none' }}>KB</Tag></span>
           </div>
 
-          <Button type="text" icon={<EditOutlined />} onClick={onNewSession} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
+          <Button type="text" icon={<EditOutlined />} onClick={onNewSession} style={{ color: headerIconColor, justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
             New chat
           </Button>
-          <Button type="text" icon={<SearchOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
+          <Button type="text" icon={<SearchOutlined />} style={{ color: headerIconColor, justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
             Search
           </Button>
 
-          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginBottom: 8, marginTop: 24, fontWeight: 600 }}>Branches</div>
+          <div style={{ padding: '0 12px', fontSize: 12, color: isDarkMode ? '#a0a0a0' : '#5f6368', marginBottom: 8, marginTop: 24, fontWeight: 600 }}>Branches</div>
           <Segmented
             options={branches.map((b) => ({ label: b.name || b.id, value: b.id }))}
             value={branchId}
             onChange={(v) => setBranchId(String(v))}
-            style={{ width: '100%', marginBottom: 16, background: '#282a2c' }}
+            style={{ width: '100%', marginBottom: 16, background: itemHoverBg }}
           />
 
-          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginTop: 8, marginBottom: 8, fontWeight: 600 }}>Chats</div>
+          <div style={{ padding: '0 12px', fontSize: 12, color: isDarkMode ? '#a0a0a0' : '#5f6368', marginTop: 8, marginBottom: 8, fontWeight: 600 }}>Chats</div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {sessions.map((s) => (
               <Dropdown
@@ -317,8 +340,8 @@ export default function KnowledgeBaseChat() {
                   icon={<MessageOutlined />} 
                   onClick={() => setSessionId(s.id)}
                   style={{ 
-                    color: s.id === sessionId ? '#a8c7fa' : '#e3e3e3', 
-                    background: s.id === sessionId ? '#1c2b41' : 'transparent',
+                    color: s.id === sessionId ? accentColor : headerIconColor, 
+                    background: s.id === sessionId ? (isDarkMode ? '#1c2b41' : '#e6f4ff') : 'transparent',
                     justifyContent: 'flex-start', 
                     width: '100%', 
                     height: 40, 
@@ -336,13 +359,19 @@ export default function KnowledgeBaseChat() {
 
         <Content style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', flex: 1, background: bgColor }}>
           <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 10 }}>
-            {leftSiderCollapsed && <Button type="text" icon={<MenuOutlined />} onClick={() => setLeftSiderCollapsed(false)} style={{ color: '#e3e3e3' }} />}
+            <Space>
+              <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => window.history.back()} style={{ color: headerIconColor, background: sidebarBg, borderRadius: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                返回工单系统
+              </Button>
+              {leftSiderCollapsed && <Button type="text" icon={<MenuOutlined />} onClick={() => setLeftSiderCollapsed(false)} style={{ color: headerIconColor, background: sidebarBg, borderRadius: '50%', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }} />}
+            </Space>
           </div>
           <div style={{ position: 'absolute', top: 16, right: 24, zIndex: 10 }}>
             <Space>
-              <Badge count={queue.filter((q) => q.state === 'queued').length} size="small"><Button type="text" style={{ color: '#e3e3e3' }}>Queue</Button></Badge>
-              <Tag color={streaming ? '#1c2b41' : '#3c4043'} style={{ border: 'none', color: streaming ? '#a8c7fa' : '#e3e3e3', borderRadius: 12 }}>{stepText}</Tag>
-              {ttftMs && <Tag color="#3c4043" style={{ border: 'none', color: '#e3e3e3', borderRadius: 12 }}>TTFT: {ttftMs}ms</Tag>}
+              <Button type="text" icon={<BgColorsOutlined />} onClick={toggleTheme} style={{ color: headerIconColor, background: sidebarBg, borderRadius: '50%', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }} title="Toggle Theme" />
+              <Badge count={queue.filter((q) => q.state === 'queued').length} size="small"><Button type="text" style={{ color: headerIconColor }}>Queue</Button></Badge>
+              <Tag color={streaming ? (isDarkMode ? '#1c2b41' : '#e6f4ff') : (isDarkMode ? '#3c4043' : '#f0f0f0')} style={{ border: 'none', color: streaming ? accentColor : headerIconColor, borderRadius: 12 }}>{stepText}</Tag>
+              {ttftMs && <Tag color={isDarkMode ? '#3c4043' : '#f0f0f0'} style={{ border: 'none', color: headerIconColor, borderRadius: 12 }}>TTFT: {ttftMs}ms</Tag>}
               <Avatar icon={<UserOutlined />} src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" />
             </Space>
           </div>
@@ -350,13 +379,13 @@ export default function KnowledgeBaseChat() {
           <div style={{ flex: 1, overflowY: 'auto', padding: '40px 10%', display: 'flex', flexDirection: 'column' }}>
             {messagesList.length === 0 ? (
               <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 800 }}>
-                <Title level={2} style={{ color: '#fff', fontWeight: 400 }}>
-                  <span style={{ color: '#a8c7fa' }}>✦</span> Hello, {user?.username || 'User'}
+                <Title level={2} style={{ color: titleColor, fontWeight: 400 }}>
+                  <span style={{ color: accentColor }}>✦</span> Hello, {user?.username || 'User'}
                 </Title>
-                <Title level={1} style={{ color: '#fff', fontSize: 48, fontWeight: 400, marginTop: 0 }}>
+                <Title level={1} style={{ color: titleColor, fontSize: 48, fontWeight: 400, marginTop: 0 }}>
                   Knowledge Base Chat
                 </Title>
-                <Alert type="info" message="已集成：12项流式标准能力，并完美保留了暗黑界面外观与你的操作习惯。" style={{ background: '#1e1f20', border: '1px solid #3c4043', color: '#e3e3e3', marginTop: 24 }} />
+                <Alert type="info" message="已集成：12项流式标准能力，支持明暗主题切换以及工单系统返回按钮。" style={{ background: containerBg, border: `1px solid ${borderColor}`, color: textColor, marginTop: 24, borderRadius: 12 }} />
               </div>
             ) : (
               <div style={{ maxWidth: 900, margin: '0 auto', width: '100%', paddingBottom: 150 }}>
@@ -364,11 +393,11 @@ export default function KnowledgeBaseChat() {
                   if (m.role === 'user') {
                     return (
                       <div key={m.id} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
-                        <div style={{ background: '#282a2c', padding: '12px 20px', borderRadius: '24px 24px 4px 24px', maxWidth: '80%', color: '#e3e3e3', fontSize: 16 }}>
+                        <div style={{ background: userBubbleBg, border: userBubbleBorder, padding: '12px 20px', borderRadius: '24px 24px 4px 24px', maxWidth: '80%', color: userBubbleColor, fontSize: 16 }}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                           <div style={{ textAlign: 'right', marginTop: 8 }}>
                             <Tooltip title="Branch from here">
-                              <Button type="text" size="small" icon={<EditOutlined />} onClick={() => void onCreateBranch(m.id)} style={{ color: '#888' }} />
+                              <Button type="text" size="small" icon={<EditOutlined />} onClick={() => void onCreateBranch(m.id)} style={{ color: isDarkMode ? '#888' : '#5f6368' }} />
                             </Tooltip>
                           </div>
                         </div>
@@ -378,12 +407,12 @@ export default function KnowledgeBaseChat() {
                     const isLast = i === messagesList.length - 1;
                     return (
                       <div key={m.id} style={{ display: 'flex', marginBottom: 32, alignItems: 'flex-start' }}>
-                        <Avatar icon={<RobotOutlined />} style={{ background: '#a8c7fa', color: '#000', marginRight: 16, flexShrink: 0 }} />
-                        <div style={{ color: '#e3e3e3', fontSize: 16, lineHeight: 1.6, flex: 1, overflow: 'hidden' }}>
+                        <Avatar icon={<RobotOutlined />} style={{ background: accentColor, color: isDarkMode ? '#000' : '#fff', marginRight: 16, flexShrink: 0 }} />
+                        <div style={{ color: textColor, fontSize: 16, lineHeight: 1.6, flex: 1, overflow: 'hidden' }}>
                           
                           {/* Reasonings and Tools (Only show for the active/latest generation, or attach to message if stored) */}
                           {isLast && (reasoningSummary || toolStates.length > 0) && (
-                            <div style={{ marginBottom: 16, background: '#1e1f20', padding: 16, borderRadius: 16, border: '1px solid #3c4043' }}>
+                            <div style={{ marginBottom: 16, background: containerBg, padding: 16, borderRadius: 16, border: `1px solid ${borderColor}` }}>
                               {reasoningSummary && (
                                 <Collapse
                                   size="small"
@@ -391,8 +420,8 @@ export default function KnowledgeBaseChat() {
                                   expandIconPosition="end"
                                   items={[{ 
                                     key: '1', 
-                                    label: <Space><BulbOutlined style={{ color: '#a8c7fa' }} /> <Text style={{ color: '#e3e3e3' }}>{reasoningSummary}</Text></Space>, 
-                                    children: <Text type="secondary" style={{ color: '#a0a0a0' }}>{reasoningDetail || 'No details.'}</Text> 
+                                    label: <Space><BulbOutlined style={{ color: accentColor }} /> <Text style={{ color: textColor }}>{reasoningSummary}</Text></Space>, 
+                                    children: <Text type="secondary" style={{ color: isDarkMode ? '#a0a0a0' : '#5f6368' }}>{reasoningDetail || 'No details.'}</Text> 
                                   }]}
                                 />
                               )}
@@ -403,8 +432,8 @@ export default function KnowledgeBaseChat() {
                                   expandIconPosition="end"
                                   items={[{ 
                                     key: '2', 
-                                    label: <Space><ToolOutlined style={{ color: '#a8c7fa' }} /> <Text style={{ color: '#e3e3e3' }}>Tools ({toolStates.length})</Text></Space>, 
-                                    children: <List size="small" dataSource={toolStates} renderItem={(x) => <List.Item style={{ color: '#a0a0a0', borderBottom: 'none', padding: '4px 0' }}>{x.name} · {x.status} {x.step ? `· ${x.step}` : ''}</List.Item>} /> 
+                                    label: <Space><ToolOutlined style={{ color: accentColor }} /> <Text style={{ color: textColor }}>Tools ({toolStates.length})</Text></Space>, 
+                                    children: <List size="small" dataSource={toolStates} renderItem={(x) => <List.Item style={{ color: isDarkMode ? '#a0a0a0' : '#5f6368', borderBottom: 'none', padding: '4px 0' }}>{x.name} · {x.status} {x.step ? `· ${x.step}` : ''}</List.Item>} /> 
                                   }]}
                                 />
                               )}
@@ -425,23 +454,23 @@ export default function KnowledgeBaseChat() {
                           )}
 
                           {isLast && citations.length > 0 && (
-                            <div style={{ marginTop: 16, background: '#1e1f20', padding: 16, borderRadius: 16, border: '1px solid #3c4043' }}>
-                              <Text strong style={{ color: '#fff', marginBottom: 8, display: 'block' }}>Sources</Text>
+                            <div style={{ marginTop: 16, background: containerBg, padding: 16, borderRadius: 16, border: `1px solid ${borderColor}` }}>
+                              <Text strong style={{ color: titleColor, marginBottom: 8, display: 'block' }}>Sources</Text>
                               <Segmented
                                 size="small"
                                 options={[{ label: 'ALL', value: 'ALL' }, { label: 'Web', value: 'Web' }, { label: 'KB', value: 'KB' }, { label: 'Internal', value: 'Internal' }]}
                                 value={citationGroup}
                                 onChange={(v) => setCitationGroup(v as any)}
-                                style={{ marginBottom: 12, background: '#282a2c' }}
+                                style={{ marginBottom: 12, background: itemHoverBg }}
                               />
                               <List
                                 size="small"
                                 dataSource={filteredCitations}
                                 renderItem={(c) => (
-                                  <List.Item style={{ borderBottom: '1px solid #3c4043' }}>
+                                  <List.Item style={{ borderBottom: `1px solid ${borderColor}` }}>
                                     <Space direction="vertical" size={2}>
-                                      {c.url ? <a href={c.url} target="_blank" rel="noreferrer" style={{ color: '#a8c7fa' }}>{c.title}</a> : <Text style={{ color: '#a8c7fa' }}>{c.title}</Text>}
-                                      <Text style={{ color: '#a0a0a0', fontSize: 13 }}>{c.snippet}</Text>
+                                      {c.url ? <a href={c.url} target="_blank" rel="noreferrer" style={{ color: accentColor }}>{c.title}</a> : <Text style={{ color: accentColor }}>{c.title}</Text>}
+                                      <Text style={{ color: isDarkMode ? '#a0a0a0' : '#5f6368', fontSize: 13 }}>{c.snippet}</Text>
                                     </Space>
                                   </List.Item>
                                 )}
@@ -450,24 +479,24 @@ export default function KnowledgeBaseChat() {
                           )}
 
                           <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                            <Button type="text" size="small" onClick={() => void onDeleteMessage(m.id)} style={{ color: '#888' }}>Delete</Button>
+                            <Button type="text" size="small" onClick={() => void onDeleteMessage(m.id)} style={{ color: isDarkMode ? '#888' : '#5f6368' }}>Delete</Button>
                             {isLast && currentRunId && (
                               <>
-                                <Button type="text" size="small" onClick={() => void onLoadCheckpoints()} style={{ color: '#888' }}>Checkpoints</Button>
-                                <Button type="text" size="small" onClick={() => void onRejoin()} style={{ color: '#888' }}>Rejoin</Button>
+                                <Button type="text" size="small" onClick={() => void onLoadCheckpoints()} style={{ color: isDarkMode ? '#888' : '#5f6368' }}>Checkpoints</Button>
+                                <Button type="text" size="small" onClick={() => void onRejoin()} style={{ color: isDarkMode ? '#888' : '#5f6368' }}>Rejoin</Button>
                               </>
                             )}
                           </div>
 
                           {/* Checkpoints UI if loaded */}
                           {isLast && checkpoints.length > 0 && (
-                            <div style={{ marginTop: 8, padding: 8, background: '#1e1f20', borderRadius: 8, border: '1px solid #3c4043' }}>
+                            <div style={{ marginTop: 8, padding: 8, background: containerBg, borderRadius: 8, border: `1px solid ${borderColor}` }}>
                               <List
                                 size="small"
                                 dataSource={checkpoints}
                                 renderItem={(ck: any) => (
                                   <List.Item actions={[<Button type="link" size="small" onClick={() => void onReplay(ck.id)}>Replay</Button>]}>
-                                    <Text style={{ color: '#e3e3e3' }}>{ck.name || ck.id}</Text>
+                                    <Text style={{ color: textColor }}>{ck.name || ck.id}</Text>
                                   </List.Item>
                                 )}
                               />
@@ -484,24 +513,24 @@ export default function KnowledgeBaseChat() {
             )}
           </div>
 
-          <div style={{ padding: '0 10%', paddingBottom: 32, position: 'absolute', bottom: 0, width: '100%', background: 'linear-gradient(to top, #000000 70%, transparent)' }}>
-            <div style={{ maxWidth: 900, margin: '0 auto', background: '#1e1f20', borderRadius: 32, padding: '12px 16px', display: 'flex', flexDirection: 'column', border: '1px solid #3c4043' }}>
+          <div style={{ padding: '0 10%', paddingBottom: 32, position: 'absolute', bottom: 0, width: '100%', background: `linear-gradient(to top, ${bgColor} 70%, transparent)` }}>
+            <div style={{ maxWidth: 900, margin: '0 auto', background: inputContainerBg, borderRadius: 32, padding: '12px 16px', display: 'flex', flexDirection: 'column', border: `1px solid ${borderColor}`, boxShadow: isDarkMode ? 'none' : '0 4px 12px rgba(0,0,0,0.05)' }}>
               <Input.TextArea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Ask anything, search your data, @mention or /tools"
                 autoSize={{ minRows: 1, maxRows: 6 }}
-                style={{ background: 'transparent', color: '#e3e3e3', fontSize: 16, boxShadow: 'none', border: 'none', resize: 'none' }}
+                style={{ background: 'transparent', color: textColor, fontSize: 16, boxShadow: 'none', border: 'none', resize: 'none' }}
               />
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
                 <Space size={16}>
-                  <Button type="text" icon={<PlusOutlined />} style={{ color: '#e3e3e3', borderRadius: '50%' }} />
-                  <Button type="text" icon={<SlidersOutlined />} style={{ color: '#e3e3e3', borderRadius: '50%' }} />
-                  <Button type="text" icon={<DatabaseOutlined />} style={{ color: '#e3e3e3', borderRadius: '50%' }} />
+                  <Button type="text" icon={<PlusOutlined />} style={{ color: headerIconColor, borderRadius: '50%' }} />
+                  <Button type="text" icon={<SlidersOutlined />} style={{ color: headerIconColor, borderRadius: '50%' }} />
+                  <Button type="text" icon={<DatabaseOutlined />} style={{ color: headerIconColor, borderRadius: '50%' }} />
                 </Space>
                 <Space>
-                  <Button type="text" style={{ color: '#a8c7fa', background: '#282a2c', borderRadius: 20 }}>
+                  <Button type="text" style={{ color: accentColor, background: itemHoverBg, borderRadius: 20 }}>
                     KB Agent <DownOutlined style={{ fontSize: 10 }} />
                   </Button>
                   <Button 
@@ -511,8 +540,8 @@ export default function KnowledgeBaseChat() {
                     loading={streaming}
                     style={{ 
                       borderRadius: '50%', 
-                      background: input.trim() ? '#a8c7fa' : 'transparent', 
-                      color: input.trim() ? '#000' : '#e3e3e3',
+                      background: input.trim() ? accentColor : 'transparent', 
+                      color: input.trim() ? (isDarkMode ? '#000' : '#fff') : headerIconColor,
                       borderColor: 'transparent'
                     }} 
                   />
