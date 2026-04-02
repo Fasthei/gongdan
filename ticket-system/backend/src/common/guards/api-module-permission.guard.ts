@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
 import { ApiPermissionsService, type ModuleKey } from '../../api-permissions/api-permissions.service';
 
@@ -7,6 +7,8 @@ const WHITELIST_PREFIXES = [
   '/api/health',
   '/api/public/bing-background',
   '/api/api-permissions/',
+  '/api/api-keys/',
+  '/api/api-keys',
 ];
 
 function isWhitelistedPath(path: string) {
@@ -17,7 +19,6 @@ function isWhitelistedPath(path: string) {
 }
 
 function resolveModuleKey(path: string): ModuleKey | null {
-  // path is like: /api/tickets/:id or /api/status/dashboard
   if (path.startsWith('/api/tickets')) return 'ticket';
   if (path.startsWith('/api/customers')) return 'customer';
   if (path.startsWith('/api/engineers')) return 'engineer';
@@ -31,7 +32,7 @@ export class ApiModulePermissionGuard implements CanActivate {
   constructor(private readonly apiPermissionsService: ApiPermissionsService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const req = context.switchToHttp().getRequest<Request>();
+    const req = context.switchToHttp().getRequest<Request & { apiClient?: { id: string; allowedModules: string[] } }>();
     const path = req.path || req.url || '';
 
     if (isWhitelistedPath(path)) return true;
@@ -39,6 +40,15 @@ export class ApiModulePermissionGuard implements CanActivate {
     const moduleKey = resolveModuleKey(path);
     if (!moduleKey) return true;
 
+    // API Key 认证：检查密钥的 allowedModules
+    if (req.apiClient) {
+      if (!req.apiClient.allowedModules.includes(moduleKey)) {
+        throw new ForbiddenException(`该 API 密钥无权访问模块: ${moduleKey}`);
+      }
+      return true;
+    }
+
+    // JWT 用户认证：检查全局模块开关
     const enabled = await this.apiPermissionsService.isModuleEnabled(moduleKey);
     if (!enabled) {
       throw new ForbiddenException(`API模块已关闭: ${moduleKey}`);

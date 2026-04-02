@@ -11,6 +11,7 @@ import { AttachmentModule } from './attachment/attachment.module';
 import { NotificationModule } from './notification/notification.module';
 import { StatusMonitorModule } from './status-monitor/status-monitor.module';
 import { ApiPermissionsModule } from './api-permissions/api-permissions.module';
+import { ApiKeyModule } from './api-key/api-key.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { ApiPermissionsModule } from './api-permissions/api-permissions.module';
     NotificationModule,
     StatusMonitorModule,
     ApiPermissionsModule,
+    ApiKeyModule,
   ],
   controllers: [AppController],
 })

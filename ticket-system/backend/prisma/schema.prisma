@@ -198,3 +198,33 @@ model ApiModulePermission {
 
   @@index([enabled])
 }
+
+model ApiKey {
+  id             String    @id @default(uuid())
+  name           String
+  keyPrefix      String
+  keyHash        String    @unique
+  allowedModules String[]
+  enabled        Boolean   @default(true)
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  lastUsedAt     DateTime?
+  expiresAt      DateTime?
+
+  @@index([keyHash])
+  @@index([enabled])
+}
+
+model AuthRefreshSession {
+  id        String    @id @default(uuid())
+  userId    String
+  role      String
+  jti       String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, role])
+  @@index([expiresAt])
+}

@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { clearAuthStorage } from '../services/authSession';
+import { apiUrl } from '../config/apiBase';
 
 interface User {
   id: string;
@@ -44,9 +46,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (refreshToken) {
+      fetch(apiUrl('/api/auth/logout'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      }).catch(() => {});
+    }
+    clearAuthStorage();
     setUser(null);
   };
 

@@ -27,11 +27,22 @@ export default function CustomerLogin() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await api.post('/auth/customer-login', { customerCode });
+      if (!navigator.onLine) throw new Error('当前网络不可用，请检查网络后重试');
+      let data: any;
+      try {
+        const res = await api.post('/auth/customer-login', { customerCode }, { timeout: 8000 });
+        data = res.data;
+      } catch (e: any) {
+        const code = e?.code;
+        const networkLike = !e?.response || code === 'ECONNABORTED';
+        if (!networkLike) throw e;
+        const retryRes = await api.post('/auth/customer-login', { customerCode }, { timeout: 8000 });
+        data = retryRes.data;
+      }
       login(data.accessToken, data.refreshToken, data.user);
       navigate('/tickets');
     } catch (err: any) {
-      setError(err.response?.data?.message || '客户编号无效，请联系运营');
+      setError(err.response?.data?.message || err.message || '客户编号无效，请联系运营');
     } finally {
       setLoading(false);
     }

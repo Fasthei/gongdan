@@ -16,7 +16,7 @@ const VALID_TRANSITIONS: Record<TicketStatus, TicketStatus[]> = {
 
 const ROLE_PERMISSIONS: Partial<Record<TicketStatus, UserRole[]>> = {
   ACCEPTED:      ['OPERATOR', 'ENGINEER', 'ADMIN'],
-  IN_PROGRESS:   ['ENGINEER', 'ADMIN'],
+  IN_PROGRESS:   ['ENGINEER', 'ADMIN', 'OPERATOR'],
   PENDING_CLOSE: ['ENGINEER', 'ADMIN'],
   CLOSED:        ['OPERATOR', 'ADMIN'],
 };

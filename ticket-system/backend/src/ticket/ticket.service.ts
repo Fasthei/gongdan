@@ -218,6 +218,8 @@ export class TicketService {
       throw new BadRequestException('专属客户工单需要 L2 或以上级别工程师');
     }
 
+    validateTransition(ticket as any, 'ACCEPTED', { id: operatorId, role: 'OPERATOR' });
+
     return this.prisma.ticket.update({
       where: { id: ticketId },
       data: {
@@ -271,10 +273,11 @@ export class TicketService {
     const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('工单不存在');
     if (ticket.status !== 'PENDING_CLOSE') throw new BadRequestException('工单不在待关闭状态');
+    validateTransition(ticket as any, 'IN_PROGRESS', { id: operatorId, role: 'OPERATOR' });
 
     return this.prisma.ticket.update({
       where: { id: ticketId },
-      data: { status: 'IN_PROGRESS' },
+      data: { status: 'IN_PROGRESS', closeRequestedAt: null, closeRequestedBy: null },
     });
   }
 
@@ -290,11 +293,20 @@ export class TicketService {
   // ─── 工单留言板 ───────────────────────────────────────────────────────
 
   async getMessages(ticketId: string, user: any) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { customer: { select: { createdBy: true } } },
+    });
     if (!ticket) throw new NotFoundException('工单不存在');
 
     // 客户只能查看自己工单的留言
     if (user.role === 'CUSTOMER' && ticket.customerId !== user.id) {
+      throw new ForbiddenException('无权查看此工单留言');
+    }
+    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
+      throw new ForbiddenException('无权查看此工单留言');
+    }
+    if (user.role === 'ENGINEER' && ticket.assignedEngineerId && ticket.assignedEngineerId !== user.id) {
       throw new ForbiddenException('无权查看此工单留言');
     }
 
@@ -307,11 +319,20 @@ export class TicketService {
   async addMessage(ticketId: string, content: string, user: any, attachmentUrls?: string[]) {
     if (!content?.trim()) throw new BadRequestException('留言内容不能为空');
 
-    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { customer: { select: { createdBy: true } } },
+    });
     if (!ticket) throw new NotFoundException('工单不存在');
 
     // 客户只能在自己工单留言
     if (user.role === 'CUSTOMER' && ticket.customerId !== user.id) {
+      throw new ForbiddenException('无权在此工单留言');
+    }
+    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
+      throw new ForbiddenException('无权在此工单留言');
+    }
+    if (user.role === 'ENGINEER' && ticket.assignedEngineerId && ticket.assignedEngineerId !== user.id) {
       throw new ForbiddenException('无权在此工单留言');
     }
 
@@ -349,8 +370,17 @@ export class TicketService {
     const msg = await this.prisma.ticketMessage.findUnique({ where: { id: messageId } });
     if (!msg) throw new NotFoundException('留言不存在');
 
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: msg.ticketId },
+      include: { customer: { select: { createdBy: true } } },
+    });
+    if (!ticket) throw new NotFoundException('工单不存在');
+
     // 只能删自己的留言，或管理员/运营可删任意留言
     if (msg.authorId !== user.id && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
+      throw new ForbiddenException('无权删除此留言');
+    }
+    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
       throw new ForbiddenException('无权删除此留言');
     }
 

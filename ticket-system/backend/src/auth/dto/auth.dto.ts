@@ -21,3 +21,9 @@ export class RefreshTokenDto {
   @IsNotEmpty()
   refreshToken: string;
 }
+
+export class LogoutDto {
+  @IsString()
+  @IsNotEmpty()
+  refreshToken: string;
+}

@@ -27,13 +27,24 @@ export default function StaffLogin() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await api.post('/auth/staff-login', { username, password });
+      if (!navigator.onLine) throw new Error('当前网络不可用，请检查网络后重试');
+      let data: any;
+      try {
+        const res = await api.post('/auth/staff-login', { username, password }, { timeout: 8000 });
+        data = res.data;
+      } catch (e: any) {
+        const code = e?.code;
+        const networkLike = !e?.response || code === 'ECONNABORTED';
+        if (!networkLike) throw e;
+        const retryRes = await api.post('/auth/staff-login', { username, password }, { timeout: 8000 });
+        data = retryRes.data;
+      }
       login(data.accessToken, data.refreshToken, data.user);
       const role = data.user?.role;
       if (role === 'OPERATOR') navigate('/operator');
       else navigate('/engineer');
     } catch (err: any) {
-      setError(err.response?.data?.message || '用户名或密码错误');
+      setError(err.response?.data?.message || err.message || '用户名或密码错误');
     } finally {
       setLoading(false);
     }
