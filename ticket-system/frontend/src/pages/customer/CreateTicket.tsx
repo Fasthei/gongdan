@@ -9,7 +9,7 @@ const { Title } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
-const DAILY_LIMIT = 10;
+const DAILY_LIMIT = 3;
 
 export default function CreateTicket() {
   const [form] = Form.useForm();
@@ -31,15 +31,19 @@ export default function CreateTicket() {
   const handleUpload = async (file: File) => {
     try {
       const { data } = await api.post('/attachments/sas-token', { fileName: file.name });
-      // 直传到 Blob Storage
-      await fetch(data.sasUrl, { method: 'PUT', body: file, headers: { 'x-ms-blob-type': 'BlockBlob' } });
+      const resp = await fetch(data.sasUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Type': file.type || 'application/octet-stream' },
+      });
+      if (!resp.ok) throw new Error(`Blob 返回 ${resp.status}`);
       const url = data.sasUrl.split('?')[0];
       setAttachmentUrls((prev) => [...prev, url]);
       message.success(`${file.name} 上传成功`);
-    } catch {
-      message.warning(`${file.name} 上传失败，可继续提交工单`);
+    } catch (err: any) {
+      message.error(`${file.name} 上传失败：${err?.message || '请检查网络后重试'}`);
     }
-    return false; // 阻止 antd 默认上传
+    return false;
   };
 
   const onFinish = async (values: any) => {

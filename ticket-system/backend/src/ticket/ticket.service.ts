@@ -16,7 +16,7 @@ export class TicketService {
   private readonly IMMUTABLE_FIELDS = ['platform', 'accountInfo', 'modelUsed', 'description', 'requestExample'];
 
   // 每日工单上限（普通客户）
-  private readonly DAILY_TICKET_LIMIT = 10;
+  private readonly DAILY_TICKET_LIMIT = 3;
 
   private async checkDailyLimit(customerId: string, tier: string) {
     if (tier !== 'NORMAL') return;
