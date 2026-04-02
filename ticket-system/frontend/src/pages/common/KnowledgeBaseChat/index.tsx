@@ -1,45 +1,189 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Layout, Menu, Input, Button, Typography, Space, Avatar, ConfigProvider, theme, Tag } from 'antd';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Layout, Input, Button, Typography, Space, Avatar, ConfigProvider, theme, Tag, Dropdown, MenuProps, Modal, List, Collapse, Alert, Spin, Segmented, Badge, Tooltip } from 'antd';
 import {
-  MenuOutlined, PlusOutlined, SearchOutlined, StarOutlined, FolderOutlined,
-  SettingOutlined, SendOutlined, SlidersOutlined, DatabaseOutlined, DownOutlined,
-  UserOutlined, RobotOutlined, EditOutlined, MessageOutlined
+  MenuOutlined, PlusOutlined, SearchOutlined, FolderOutlined,
+  SendOutlined, SlidersOutlined, DatabaseOutlined, DownOutlined,
+  UserOutlined, RobotOutlined, EditOutlined, MessageOutlined, ToolOutlined, BulbOutlined
 } from '@ant-design/icons';
-import { useStream } from '@langchain/react';
-import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuth } from '../../../contexts/AuthContext';
+import {
+  createBranch, createSession, deleteMessage, deleteSession, clearSession,
+  getContracts, getRunEvents, interruptRun, listBranches, listCheckpoints,
+  listMessages, listSessions, renameSession, replayRun, restoreSession, streamChat
+} from '../../../services/kbChatApi';
+import { ChatMessage, Citation, KbEvent, UiPayload } from '../../../types/kbChat';
+import { renderUiPayload } from '../../../components/kb/uiRegistry';
 
 const { Sider, Content } = Layout;
 const { Text, Title } = Typography;
 
-// Gemini Dark Theme colors
 const bgColor = '#000000';
 const sidebarBg = '#1e1f20';
-const inputBg = '#282a2c';
 const textColor = '#e3e3e3';
+
+interface QueueItem {
+  id: string;
+  prompt: string;
+  state: 'queued' | 'running' | 'done' | 'failed';
+}
 
 export default function KnowledgeBaseChat() {
   const { user } = useAuth();
-  const apiUrl = import.meta.env.VITE_KB_CHAT_API_ORIGIN || 'https://aichatgongdan-dna6ghavchd9h6e0.eastasia-01.azurewebsites.net';
-  
-  const stream = useStream({
-    apiUrl,
-    assistantId: 'kb-chat-agent',
-  });
-
+  const [contracts, setContracts] = useState<any>(null);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessionId, setSessionId] = useState<string>('');
+  const [branches, setBranches] = useState<any[]>([]);
+  const [branchId, setBranchId] = useState<string>('main');
+  const [messagesList, setMessagesList] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [currentRunId, setCurrentRunId] = useState<string>('');
+  const [streaming, setStreaming] = useState(false);
+  
+  const [reasoningSummary, setReasoningSummary] = useState('');
+  const [reasoningDetail, setReasoningDetail] = useState('');
+  const [toolStates, setToolStates] = useState<any[]>([]);
+  const [citations, setCitations] = useState<Citation[]>([]);
+  const [interruptInfo, setInterruptInfo] = useState<any>(null);
+  const [checkpoints, setCheckpoints] = useState<any[]>([]);
+  const [structuredBlocks, setStructuredBlocks] = useState<UiPayload[]>([]);
+  const [joinedFromSeq, setJoinedFromSeq] = useState(1);
+  const [stepText, setStepText] = useState('Idle');
+  const [ttftMs, setTtftMs] = useState<number | null>(null);
+  const [citationGroup, setCitationGroup] = useState<'ALL' | 'Web' | 'KB' | 'Internal'>('ALL');
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [leftSiderCollapsed, setLeftSiderCollapsed] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const init = useCallback(async () => {
+    try {
+      const [ctr, sess] = await Promise.all([getContracts(), listSessions()]);
+      setContracts(ctr);
+      setSessions(sess || []);
+      if (sess?.length) {
+        setSessionId(sess[0].id);
+      } else {
+        const created = await createSession();
+        setSessionId(created.id);
+        setSessions([created]);
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => { void init(); }, [init]);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [stream.messages]);
+    if (!sessionId) return;
+    void (async () => {
+      const [bs, msgs] = await Promise.all([listBranches(sessionId), listMessages(sessionId, branchId)]);
+      setBranches(bs || []);
+      setMessagesList(msgs || []);
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    })();
+  }, [sessionId, branchId]);
+
+  const addLocalAssistantPlaceholder = () => {
+    const id = `assistant_${Date.now()}`;
+    setMessagesList((prev) => [...prev, { id, role: 'assistant', content: '', branch_id: branchId, created_at: Date.now() / 1000 }]);
+    return id;
+  };
+
+  const updateAssistantContent = (id: string, append: string) => {
+    setMessagesList((prev) => prev.map((m) => (m.id === id ? { ...m, content: (m.content || '') + append } : m)));
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  };
+
+  const enqueue = (prompt: string) => {
+    setQueue((prev) => [...prev, { id: `q_${Date.now()}`, prompt, state: 'queued' }]);
+  };
+
+  const runNextFromQueue = async () => {
+    const next = queue.find((item) => item.state === 'queued');
+    if (!next || streaming) return;
+    setQueue((prev) => prev.map((i) => (i.id === next.id ? { ...i, state: 'running' } : i)));
+    await submitPrompt(next.prompt);
+    setQueue((prev) => prev.map((i) => (i.id === next.id ? { ...i, state: 'done' } : i)));
+  };
+
+  useEffect(() => { if (!streaming) void runNextFromQueue(); }, [queue, streaming]);
+
+  const handleEvent = (assistantId: string) => (evt: KbEvent) => {
+    setCurrentRunId(evt.run_id);
+    setJoinedFromSeq(evt.seq);
+    if (evt.type === 'message_start') {
+      setStepText('已开始响应');
+      setTtftMs(null);
+    }
+    if (evt.type === 'token') {
+      updateAssistantContent(assistantId, evt.payload?.text || '');
+      if (!ttftMs) setTtftMs(Math.max(1, Math.round((Date.now() - Number((assistantId.split('_')[1] || Date.now()))) / 1)));
+    }
+    if (evt.type === 'reasoning_summary') {
+      setReasoningSummary(evt.payload?.summary || '');
+      setReasoningDetail(evt.payload?.detail || '');
+    }
+    if (evt.type === 'tool_status') {
+      setToolStates((prev) => [...prev, evt.payload]);
+      if (evt.payload?.step) setStepText(evt.payload.step);
+    }
+    if (evt.type === 'citation') {
+      setCitations(evt.payload?.items || []);
+    }
+    if (evt.type === 'interrupt') {
+      setInterruptInfo(evt.payload);
+    }
+    if (evt.type === 'checkpoint') {
+      setCheckpoints((prev) => [...prev, evt.payload]);
+    }
+    if (evt.type === 'ui_payload') {
+      setStructuredBlocks((prev) => [...prev, evt.payload as UiPayload]);
+    }
+    if (evt.type === 'message_end') {
+      setStepText('已完成');
+      if (evt.payload?.metrics?.ttft_ms) setTtftMs(evt.payload.metrics.ttft_ms);
+    }
+    if (evt.type === 'error') {
+      setStepText('发生错误');
+    }
+  };
+
+  const submitPrompt = async (promptRaw?: string) => {
+    const prompt = (promptRaw ?? input).trim();
+    if (!prompt || !sessionId) return;
+    setInput('');
+    setStreaming(true);
+    setReasoningSummary('');
+    setReasoningDetail('');
+    setToolStates([]);
+    setCitations([]);
+    setStructuredBlocks([]);
+    setInterruptInfo(null);
+    setStepText('排队中');
+    setTtftMs(null);
+    const assistantId = addLocalAssistantPlaceholder();
+
+    try {
+      await streamChat({ session_id: sessionId, prompt, branch_id: branchId, metadata: { mode: 'full-capability' } }, handleEvent(assistantId));
+    } catch (e) {
+      // ignore
+    } finally {
+      setStreaming(false);
+    }
+  };
 
   const handleSend = () => {
-    if (!input.trim() || stream.isLoading) return;
-    stream.submit({ messages: [{ type: "human", content: input }] });
-    setInput('');
+    if (streaming) {
+      enqueue(input);
+      setInput('');
+      return;
+    }
+    void submitPrompt();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -49,115 +193,299 @@ export default function KnowledgeBaseChat() {
     }
   };
 
-  const getTextContent = (msg: any) => {
-    if (typeof msg.content === 'string') return msg.content;
-    if (Array.isArray(msg.content)) {
-      return msg.content.map((c: any) => c.text || '').join('');
-    }
-    return '';
+  const onNewSession = async () => {
+    const created = await createSession();
+    setSessions((prev) => [created, ...prev]);
+    setSessionId(created.id);
   };
+
+  const onDeleteSession = async (sid: string) => {
+    await deleteSession(sid);
+    const next = (await listSessions()) || [];
+    setSessions(next);
+    if (next.length) setSessionId(next[0].id);
+    else {
+      const created = await createSession();
+      setSessions([created]);
+      setSessionId(created.id);
+    }
+  };
+
+  const onRenameSession = async () => {
+    if (!sessionId || !renameValue.trim()) return;
+    await renameSession(sessionId, renameValue.trim());
+    const next = (await listSessions()) || [];
+    setSessions(next);
+    setRenameModalOpen(false);
+    setRenameValue('');
+  };
+
+  const onDeleteMessage = async (mid: string) => {
+    await deleteMessage(mid);
+    setMessagesList((prev) => prev.filter((m) => m.id !== mid));
+  };
+
+  const onCreateBranch = async (fromMessageId: string) => {
+    const b = await createBranch(sessionId, fromMessageId);
+    setBranches((prev) => [...prev, b]);
+    setBranchId(b.id);
+  };
+
+  const onInterruptAction = async (action: 'approve' | 'reject' | 'resume') => {
+    if (!currentRunId) return;
+    await interruptRun(currentRunId, action);
+    setInterruptInfo(null);
+  };
+
+  const onLoadCheckpoints = async () => {
+    if (!currentRunId) return;
+    const cps = await listCheckpoints(currentRunId);
+    setCheckpoints(cps || []);
+  };
+
+  const onReplay = async (checkpointId: string) => {
+    if (!currentRunId) return;
+    await replayRun(currentRunId, checkpointId);
+  };
+
+  const onRejoin = async () => {
+    if (!currentRunId) return;
+    const missed = await getRunEvents(currentRunId, joinedFromSeq + 1);
+    const assistantId = messagesList.filter((m) => m.role === 'assistant').slice(-1)[0]?.id || '';
+    (missed || []).forEach((evt: KbEvent) => {
+      if (evt.type === 'token' && !assistantId) return;
+      handleEvent(assistantId)(evt);
+    });
+  };
+
+  const sessionMenuItems: MenuProps['items'] = [
+    { key: 'rename', label: 'Rename Session' },
+    { key: 'clear', label: 'Clear Context' },
+    { key: 'delete', label: 'Delete Session', danger: true },
+    { key: 'restore', label: 'Restore Session' },
+  ];
+
+  const filteredCitations = citations.filter((c) => (citationGroup === 'ALL' ? true : c.sourceType === citationGroup));
+
+  if (!contracts) return <Spin fullscreen />;
 
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorBgBase: bgColor, colorTextBase: textColor, colorBorder: '#3c4043' } }}>
       <Layout style={{ height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden', background: bgColor }}>
-        <Sider width={280} style={{ background: sidebarBg, padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
+        <Sider collapsed={leftSiderCollapsed} collapsedWidth={0} width={280} style={{ background: sidebarBg, padding: leftSiderCollapsed ? 0 : '16px 12px', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24, padding: '0 12px' }}>
-            <Button type="text" icon={<MenuOutlined />} style={{ color: '#e3e3e3', marginRight: 16 }} />
-            <span style={{ fontSize: 18, fontWeight: 500, color: '#fff' }}>Gemini Enterprise <Tag color="blue" style={{ borderRadius: 12, marginLeft: 8, background: '#1c2b41', color: '#a8c7fa', border: 'none' }}>Plus</Tag></span>
+            <Button type="text" icon={<MenuOutlined />} onClick={() => setLeftSiderCollapsed(!leftSiderCollapsed)} style={{ color: '#e3e3e3', marginRight: 16 }} />
+            <span style={{ fontSize: 18, fontWeight: 500, color: '#fff' }}>Agent <Tag color="blue" style={{ borderRadius: 12, marginLeft: 8, background: '#1c2b41', color: '#a8c7fa', border: 'none' }}>KB</Tag></span>
           </div>
 
-          <Button type="text" icon={<EditOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
+          <Button type="text" icon={<EditOutlined />} onClick={onNewSession} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
             New chat
           </Button>
           <Button type="text" icon={<SearchOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
             Search
           </Button>
-          <Button type="text" icon={<StarOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
-            Starred
-          </Button>
-          <Button type="text" icon={<FolderOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 24, height: 40, borderRadius: 20 }}>
-            Library
-          </Button>
 
-          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginBottom: 8, fontWeight: 600 }}>Projects</div>
-          <Button type="text" icon={<PlusOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 24, height: 40, borderRadius: 20 }}>
-            New project
-          </Button>
+          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginBottom: 8, marginTop: 24, fontWeight: 600 }}>Branches</div>
+          <Segmented
+            options={branches.map((b) => ({ label: b.name || b.id, value: b.id }))}
+            value={branchId}
+            onChange={(v) => setBranchId(String(v))}
+            style={{ width: '100%', marginBottom: 16, background: '#282a2c' }}
+          />
 
-          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginBottom: 8, fontWeight: 600 }}>Agents</div>
+          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginTop: 8, marginBottom: 8, fontWeight: 600 }}>Chats</div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            <Button type="text" style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>
-              <Space><Avatar size="small" src="https://api.dicebear.com/7.x/shapes/svg?seed=1" /> Deep Research</Space>
-            </Button>
-            <Button type="text" style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>
-              <Space><Avatar size="small" src="https://api.dicebear.com/7.x/shapes/svg?seed=2" /> Idea Generation <Tag color="blue" style={{ borderRadius: 10, scale: 0.8, background: '#1c2b41', color: '#a8c7fa', border: 'none' }}>Preview</Tag></Space>
-            </Button>
-            <Button type="text" style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>
-              <Space><Avatar size="small" src="https://api.dicebear.com/7.x/shapes/svg?seed=3" /> NotebookLM</Space>
-            </Button>
-            <Button type="text" icon={<PlusOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20, marginTop: 8 }}>
-              New agent
-            </Button>
-
-            <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginTop: 24, marginBottom: 8, fontWeight: 600 }}>Chats</div>
-            <Button type="text" icon={<MessageOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>A3 Ultra H200 GPU purchase</Button>
-            <Button type="text" icon={<MessageOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>GCP Flex Commit</Button>
-            <Button type="text" icon={<MessageOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>Vertex AI logging</Button>
+            {sessions.map((s) => (
+              <Dropdown
+                key={s.id}
+                menu={{
+                  items: sessionMenuItems,
+                  onClick: async ({ key }) => {
+                    if (key === 'rename') {
+                      setRenameValue(s.title || '');
+                      setRenameModalOpen(true);
+                    }
+                    if (key === 'clear') await clearSession(s.id);
+                    if (key === 'delete') await onDeleteSession(s.id);
+                    if (key === 'restore') await restoreSession(s.id);
+                  },
+                }}
+                trigger={['contextMenu']}
+              >
+                <Button 
+                  type="text" 
+                  icon={<MessageOutlined />} 
+                  onClick={() => setSessionId(s.id)}
+                  style={{ 
+                    color: s.id === sessionId ? '#a8c7fa' : '#e3e3e3', 
+                    background: s.id === sessionId ? '#1c2b41' : 'transparent',
+                    justifyContent: 'flex-start', 
+                    width: '100%', 
+                    height: 40, 
+                    borderRadius: 20, 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis', 
+                    whiteSpace: 'nowrap' 
+                  }}>
+                  {s.title || s.id}
+                </Button>
+              </Dropdown>
+            ))}
           </div>
-
-          <Button type="text" icon={<SettingOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', height: 40, borderRadius: 20, marginTop: 'auto' }}>
-            Settings & help
-          </Button>
         </Sider>
 
         <Content style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', flex: 1, background: bgColor }}>
+          <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 10 }}>
+            {leftSiderCollapsed && <Button type="text" icon={<MenuOutlined />} onClick={() => setLeftSiderCollapsed(false)} style={{ color: '#e3e3e3' }} />}
+          </div>
           <div style={{ position: 'absolute', top: 16, right: 24, zIndex: 10 }}>
-            <Avatar icon={<UserOutlined />} src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" />
+            <Space>
+              <Badge count={queue.filter((q) => q.state === 'queued').length} size="small"><Button type="text" style={{ color: '#e3e3e3' }}>Queue</Button></Badge>
+              <Tag color={streaming ? '#1c2b41' : '#3c4043'} style={{ border: 'none', color: streaming ? '#a8c7fa' : '#e3e3e3', borderRadius: 12 }}>{stepText}</Tag>
+              {ttftMs && <Tag color="#3c4043" style={{ border: 'none', color: '#e3e3e3', borderRadius: 12 }}>TTFT: {ttftMs}ms</Tag>}
+              <Avatar icon={<UserOutlined />} src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" />
+            </Space>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '40px 15%', display: 'flex', flexDirection: 'column' }}>
-            {stream.messages.length === 0 ? (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '40px 10%', display: 'flex', flexDirection: 'column' }}>
+            {messagesList.length === 0 ? (
               <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 800 }}>
                 <Title level={2} style={{ color: '#fff', fontWeight: 400 }}>
-                  <span style={{ color: '#a8c7fa' }}>✦</span> Hello, {user?.username || 'Yuan'}
+                  <span style={{ color: '#a8c7fa' }}>✦</span> Hello, {user?.username || 'User'}
                 </Title>
                 <Title level={1} style={{ color: '#fff', fontSize: 48, fontWeight: 400, marginTop: 0 }}>
-                  Let's get some work done!
+                  Knowledge Base Chat
                 </Title>
+                <Alert type="info" message="已集成：12项流式标准能力，并完美保留了暗黑界面外观与你的操作习惯。" style={{ background: '#1e1f20', border: '1px solid #3c4043', color: '#e3e3e3', marginTop: 24 }} />
               </div>
             ) : (
-              <div style={{ maxWidth: 800, margin: '0 auto', width: '100%', paddingBottom: 120 }}>
-                {stream.messages.map((msg, i) => {
-                  if (HumanMessage.isInstance(msg)) {
+              <div style={{ maxWidth: 900, margin: '0 auto', width: '100%', paddingBottom: 150 }}>
+                {messagesList.filter((m) => !m.deleted).map((m, i) => {
+                  if (m.role === 'user') {
                     return (
-                      <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+                      <div key={m.id} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
                         <div style={{ background: '#282a2c', padding: '12px 20px', borderRadius: '24px 24px 4px 24px', maxWidth: '80%', color: '#e3e3e3', fontSize: 16 }}>
-                          {getTextContent(msg)}
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                          <div style={{ textAlign: 'right', marginTop: 8 }}>
+                            <Tooltip title="Branch from here">
+                              <Button type="text" size="small" icon={<EditOutlined />} onClick={() => void onCreateBranch(m.id)} style={{ color: '#888' }} />
+                            </Tooltip>
+                          </div>
                         </div>
                       </div>
                     );
-                  }
-                  if (AIMessage.isInstance(msg)) {
+                  } else {
+                    const isLast = i === messagesList.length - 1;
                     return (
-                      <div key={i} style={{ display: 'flex', marginBottom: 32, alignItems: 'flex-start' }}>
+                      <div key={m.id} style={{ display: 'flex', marginBottom: 32, alignItems: 'flex-start' }}>
                         <Avatar icon={<RobotOutlined />} style={{ background: '#a8c7fa', color: '#000', marginRight: 16, flexShrink: 0 }} />
                         <div style={{ color: '#e3e3e3', fontSize: 16, lineHeight: 1.6, flex: 1, overflow: 'hidden' }}>
+                          
+                          {/* Reasonings and Tools (Only show for the active/latest generation, or attach to message if stored) */}
+                          {isLast && (reasoningSummary || toolStates.length > 0) && (
+                            <div style={{ marginBottom: 16, background: '#1e1f20', padding: 16, borderRadius: 16, border: '1px solid #3c4043' }}>
+                              {reasoningSummary && (
+                                <Collapse
+                                  size="small"
+                                  ghost
+                                  expandIconPosition="end"
+                                  items={[{ 
+                                    key: '1', 
+                                    label: <Space><BulbOutlined style={{ color: '#a8c7fa' }} /> <Text style={{ color: '#e3e3e3' }}>{reasoningSummary}</Text></Space>, 
+                                    children: <Text type="secondary" style={{ color: '#a0a0a0' }}>{reasoningDetail || 'No details.'}</Text> 
+                                  }]}
+                                />
+                              )}
+                              {toolStates.length > 0 && (
+                                <Collapse
+                                  size="small"
+                                  ghost
+                                  expandIconPosition="end"
+                                  items={[{ 
+                                    key: '2', 
+                                    label: <Space><ToolOutlined style={{ color: '#a8c7fa' }} /> <Text style={{ color: '#e3e3e3' }}>Tools ({toolStates.length})</Text></Space>, 
+                                    children: <List size="small" dataSource={toolStates} renderItem={(x) => <List.Item style={{ color: '#a0a0a0', borderBottom: 'none', padding: '4px 0' }}>{x.name} · {x.status} {x.step ? `· ${x.step}` : ''}</List.Item>} /> 
+                                  }]}
+                                />
+                              )}
+                            </div>
+                          )}
+
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                            {getTextContent(msg) || '...'}
+                            {m.content || '...'}
                           </ReactMarkdown>
+
+                          {/* Generative UI & Citations for the latest generation */}
+                          {isLast && structuredBlocks.length > 0 && (
+                            <div style={{ marginTop: 16 }}>
+                              <Space direction="vertical" style={{ width: '100%' }}>
+                                {structuredBlocks.map((payload, idx) => renderUiPayload(payload, idx))}
+                              </Space>
+                            </div>
+                          )}
+
+                          {isLast && citations.length > 0 && (
+                            <div style={{ marginTop: 16, background: '#1e1f20', padding: 16, borderRadius: 16, border: '1px solid #3c4043' }}>
+                              <Text strong style={{ color: '#fff', marginBottom: 8, display: 'block' }}>Sources</Text>
+                              <Segmented
+                                size="small"
+                                options={[{ label: 'ALL', value: 'ALL' }, { label: 'Web', value: 'Web' }, { label: 'KB', value: 'KB' }, { label: 'Internal', value: 'Internal' }]}
+                                value={citationGroup}
+                                onChange={(v) => setCitationGroup(v as any)}
+                                style={{ marginBottom: 12, background: '#282a2c' }}
+                              />
+                              <List
+                                size="small"
+                                dataSource={filteredCitations}
+                                renderItem={(c) => (
+                                  <List.Item style={{ borderBottom: '1px solid #3c4043' }}>
+                                    <Space direction="vertical" size={2}>
+                                      {c.url ? <a href={c.url} target="_blank" rel="noreferrer" style={{ color: '#a8c7fa' }}>{c.title}</a> : <Text style={{ color: '#a8c7fa' }}>{c.title}</Text>}
+                                      <Text style={{ color: '#a0a0a0', fontSize: 13 }}>{c.snippet}</Text>
+                                    </Space>
+                                  </List.Item>
+                                )}
+                              />
+                            </div>
+                          )}
+
+                          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                            <Button type="text" size="small" onClick={() => void onDeleteMessage(m.id)} style={{ color: '#888' }}>Delete</Button>
+                            {isLast && currentRunId && (
+                              <>
+                                <Button type="text" size="small" onClick={() => void onLoadCheckpoints()} style={{ color: '#888' }}>Checkpoints</Button>
+                                <Button type="text" size="small" onClick={() => void onRejoin()} style={{ color: '#888' }}>Rejoin</Button>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Checkpoints UI if loaded */}
+                          {isLast && checkpoints.length > 0 && (
+                            <div style={{ marginTop: 8, padding: 8, background: '#1e1f20', borderRadius: 8, border: '1px solid #3c4043' }}>
+                              <List
+                                size="small"
+                                dataSource={checkpoints}
+                                renderItem={(ck: any) => (
+                                  <List.Item actions={[<Button type="link" size="small" onClick={() => void onReplay(ck.id)}>Replay</Button>]}>
+                                    <Text style={{ color: '#e3e3e3' }}>{ck.name || ck.id}</Text>
+                                  </List.Item>
+                                )}
+                              />
+                            </div>
+                          )}
+
                         </div>
                       </div>
                     );
                   }
-                  return null;
                 })}
-                <div ref={messagesEndRef} />
+                <div ref={messagesEndRef} style={{ height: 1 }} />
               </div>
             )}
           </div>
 
-          <div style={{ padding: '0 15%', paddingBottom: 32, position: 'absolute', bottom: 0, width: '100%', background: 'linear-gradient(to top, #000000 70%, transparent)' }}>
-            <div style={{ maxWidth: 800, margin: '0 auto', background: '#1e1f20', borderRadius: 32, padding: '12px 16px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '0 10%', paddingBottom: 32, position: 'absolute', bottom: 0, width: '100%', background: 'linear-gradient(to top, #000000 70%, transparent)' }}>
+            <div style={{ maxWidth: 900, margin: '0 auto', background: '#1e1f20', borderRadius: 32, padding: '12px 16px', display: 'flex', flexDirection: 'column', border: '1px solid #3c4043' }}>
               <Input.TextArea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -174,13 +502,13 @@ export default function KnowledgeBaseChat() {
                 </Space>
                 <Space>
                   <Button type="text" style={{ color: '#a8c7fa', background: '#282a2c', borderRadius: 20 }}>
-                    3 Flash <DownOutlined style={{ fontSize: 10 }} />
+                    KB Agent <DownOutlined style={{ fontSize: 10 }} />
                   </Button>
                   <Button 
                     type={input.trim() ? "primary" : "text"} 
                     icon={<SendOutlined />} 
                     onClick={handleSend}
-                    loading={stream.isLoading}
+                    loading={streaming}
                     style={{ 
                       borderRadius: '50%', 
                       background: input.trim() ? '#a8c7fa' : 'transparent', 
@@ -193,6 +521,26 @@ export default function KnowledgeBaseChat() {
             </div>
           </div>
         </Content>
+
+        <Modal
+          title="Human-in-the-loop"
+          open={!!interruptInfo}
+          onCancel={() => setInterruptInfo(null)}
+          footer={[
+            <Button key="reject" danger onClick={() => void onInterruptAction('reject')}>Reject</Button>,
+            <Button key="approve" type="primary" onClick={() => void onInterruptAction('approve')}>Approve</Button>,
+          ]}
+        >
+          <Space direction="vertical">
+            <Text strong>{interruptInfo?.title || '需要人工确认'}</Text>
+            <Text>{interruptInfo?.description || ''}</Text>
+          </Space>
+        </Modal>
+
+        <Modal title="Rename Session" open={renameModalOpen} onCancel={() => setRenameModalOpen(false)} onOk={() => void onRenameSession()}>
+          <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} placeholder="Session name" />
+        </Modal>
+
       </Layout>
     </ConfigProvider>
   );
