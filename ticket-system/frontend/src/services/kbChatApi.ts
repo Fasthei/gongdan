@@ -60,28 +60,41 @@ export async function createSession() {
 }
 
 export async function deleteSession(sessionId: string) {
-  // LangGraph server often doesn't support thread hard delete by default.
-  return { ok: true };
+  const res = await fetchKb(`/threads/${sessionId}`, { method: 'DELETE' });
+  return res.json();
 }
 
 export async function restoreSession(sessionId: string) {
-  return { ok: true };
+  const res = await fetchKb(`/threads/${sessionId}/restore`, { method: 'POST' });
+  return res.json();
 }
 
 export async function renameSession(sessionId: string, title: string) {
-  return { id: sessionId, title };
+  const res = await fetchKb(`/threads/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  return res.json();
 }
 
 export async function clearSession(sessionId: string) {
-  return { ok: true };
+  const res = await fetchKb(`/threads/${sessionId}/clear`, { method: 'POST' });
+  return res.json();
 }
 
 export async function listBranches(sessionId: string) {
-  return [{ id: 'main', name: 'main' }];
+  const res = await fetchKb(`/threads/${sessionId}/branches`);
+  return res.json();
 }
 
 export async function createBranch(sessionId: string, fromMessageId: string, name?: string) {
-  return { id: `branch_${Date.now()}`, name: name || 'main' };
+  const res = await fetchKb(`/threads/${sessionId}/branches`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_message_id: fromMessageId, name }),
+  });
+  return res.json();
 }
 
 export async function listMessages(sessionId: string, branchId: string) {
@@ -96,24 +109,36 @@ export async function listMessages(sessionId: string, branchId: string) {
 }
 
 export async function deleteMessage(messageId: string) {
-  // no standard delete endpoint in simple thread server
-  return { ok: true };
+  const res = await fetchKb(`/messages/${messageId}`, { method: 'DELETE' });
+  return res.json();
 }
 
 export async function interruptRun(runId: string, action: 'approve' | 'reject' | 'resume', note?: string) {
-  return { ok: true };
+  const res = await fetchKb(`/runs/${runId}/interrupt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, note }),
+  });
+  return res.json();
 }
 
 export async function listCheckpoints(runId: string) {
-  return [];
+  const res = await fetchKb(`/runs/${runId}/checkpoints`);
+  return res.json();
 }
 
 export async function replayRun(runId: string, checkpointId: string) {
-  return { ok: true };
+  const res = await fetchKb(`/runs/${runId}/replay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ checkpoint_id: checkpointId }),
+  });
+  return res.json();
 }
 
 export async function getRunEvents(runId: string, fromSeq = 1) {
-  return [];
+  const res = await fetchKb(`/runs/${runId}/events?from_seq=${fromSeq}`);
+  return res.json();
 }
 
 export async function streamChat(
