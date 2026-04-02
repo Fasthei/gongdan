@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Avatar, Button, Card, Input, Space, Tag, Typography, message } from 'antd';
-import { DeleteOutlined, SendOutlined, UserOutlined } from '@ant-design/icons';
+import { Avatar, Button, Card, Input, Space, Tag, Typography, message, Upload } from 'antd';
+import { DeleteOutlined, SendOutlined, UserOutlined, UploadOutlined, PaperClipOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../../api/axios';
 import { useAuth } from '../../contexts/AuthContext';
@@ -23,6 +23,7 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
+  const [attachmentUrls, setAttachmentUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const msgEndRef = useRef<HTMLDivElement>(null);
 
@@ -37,12 +38,16 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
   }, [messages]);
 
   const send = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() && attachmentUrls.length === 0) return;
     setLoading(true);
     try {
-      const { data } = await api.post('/tickets/' + ticketId + '/messages', { content: input.trim() });
+      const { data } = await api.post('/tickets/' + ticketId + '/messages', {
+        content: input.trim() || '（附件）',
+        attachmentUrls,
+      });
       setMessages((prev) => [...prev, data]);
       setInput('');
+      setAttachmentUrls([]);
     } catch (err: any) {
       message.error(err.response?.data?.message || '留言失败');
     } finally {
@@ -60,6 +65,19 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
   };
 
   const canSend = !(ticketStatus === 'CLOSED' && user?.role === 'CUSTOMER');
+
+  const handleUpload = async (file: File) => {
+    try {
+      const { data } = await api.post('/attachments/sas-token', { fileName: file.name });
+      await fetch(data.sasUrl, { method: 'PUT', body: file, headers: { 'x-ms-blob-type': 'BlockBlob' } });
+      const url = data.sasUrl.split('?')[0];
+      setAttachmentUrls((prev) => [...prev, url].slice(0, 5));
+      message.success(`${file.name} 上传成功`);
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || `${file.name} 上传失败`);
+    }
+    return false;
+  };
 
   return (
     <Card bordered={false} title="工单留言板" style={{ marginTop: 16 }}>
@@ -87,6 +105,17 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
                     )}
                   </div>
                   <Text style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</Text>
+                  {Array.isArray(msg.attachmentUrls) && msg.attachmentUrls.length > 0 && (
+                    <div style={{ marginTop: 8 }}>
+                      <Space direction="vertical" size={4}>
+                        {msg.attachmentUrls.map((url: string) => (
+                          <a key={url} href={url} target="_blank" rel="noreferrer">
+                            <PaperClipOutlined /> 附件
+                          </a>
+                        ))}
+                      </Space>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -95,16 +124,24 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
         <div ref={msgEndRef} />
       </div>
       {canSend ? (
-        <Space.Compact style={{ width: '100%' }}>
-          <TextArea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
-            placeholder="Enter 发送，Shift+Enter 换行"
-            autoSize={{ minRows: 1, maxRows: 4 }}
-          />
-          <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={send} />
-        </Space.Compact>
+        <>
+          <Space style={{ marginBottom: 8 }}>
+            <Upload beforeUpload={handleUpload} showUploadList={false} multiple>
+              <Button icon={<UploadOutlined />}>上传附件</Button>
+            </Upload>
+            {attachmentUrls.length > 0 && <Text type="secondary">已上传 {attachmentUrls.length} 个附件</Text>}
+          </Space>
+          <Space.Compact style={{ width: '100%' }}>
+            <TextArea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
+              placeholder="Enter 发送，Shift+Enter 换行"
+              autoSize={{ minRows: 1, maxRows: 4 }}
+            />
+            <Button type="primary" icon={<SendOutlined />} loading={loading} onClick={send} />
+          </Space.Compact>
+        </>
       ) : (
         <Text type="secondary">工单已关闭，客户无法继续留言</Text>
       )}

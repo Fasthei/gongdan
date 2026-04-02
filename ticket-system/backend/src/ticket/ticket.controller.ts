@@ -95,8 +95,13 @@ export class TicketController {
 
   @Post(':id/messages')
   @Roles('CUSTOMER', 'ENGINEER', 'ADMIN', 'OPERATOR')
-  addMessage(@Param('id') id: string, @Body('content') content: string, @Request() req: any) {
-    return this.ticketService.addMessage(id, content, req.user);
+  addMessage(
+    @Param('id') id: string,
+    @Body('content') content: string,
+    @Body('attachmentUrls') attachmentUrls: string[],
+    @Request() req: any,
+  ) {
+    return this.ticketService.addMessage(id, content, req.user, attachmentUrls);
   }
 
   @Delete('messages/:messageId')

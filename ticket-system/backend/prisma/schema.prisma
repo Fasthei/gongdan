@@ -180,6 +180,7 @@ model TicketMessage {
   authorId    String
   authorRole  MessageAuthorRole
   content     String            @db.Text
+  attachmentUrls String[]
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 

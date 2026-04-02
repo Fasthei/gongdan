@@ -304,7 +304,7 @@ export class TicketService {
     });
   }
 
-  async addMessage(ticketId: string, content: string, user: any) {
+  async addMessage(ticketId: string, content: string, user: any, attachmentUrls?: string[]) {
     if (!content?.trim()) throw new BadRequestException('留言内容不能为空');
 
     const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
@@ -327,12 +327,20 @@ export class TicketService {
       OPERATOR: 'OPERATOR',
     };
 
+    const safeAttachmentUrls = Array.isArray(attachmentUrls)
+      ? attachmentUrls
+          .map((x) => String(x || '').trim())
+          .filter((x) => /^https?:\/\//i.test(x))
+          .slice(0, 5)
+      : [];
+
     return this.prisma.ticketMessage.create({
       data: {
         ticketId,
         authorId: user.id,
         authorRole: roleMap[user.role] as any,
         content: content.trim(),
+        attachmentUrls: safeAttachmentUrls,
       },
     });
   }
