@@ -47,6 +47,12 @@ export class TicketController {
     return this.ticketService.updateStatus(id, status, req.user);
   }
 
+  @Put(':id/self-assign')
+  @Roles('ENGINEER', 'ADMIN')
+  selfAssign(@Param('id') id: string, @Request() req: any) {
+    return this.ticketService.selfAssign(id, req.user.id);
+  }
+
   @Put(':id/assign')
   @Roles('OPERATOR', 'ADMIN')
   assign(@Param('id') id: string, @Body('engineerId') engineerId: string, @Request() req: any) {

@@ -93,7 +93,7 @@ export default function OperatorTicketList() {
       render: (_: any, r: any) => r.assignedEngineer ? `${r.assignedEngineer.username}(${r.assignedEngineer.level})` : <span style={{ color: '#999' }}>未分配</span>,
     },
     {
-      title: 'SLA', dataIndex: 'slaDeadline', width: 120,
+      title: 'SLO', dataIndex: 'slaDeadline', width: 120,
       render: (d: string) => {
         const over = dayjs(d).isBefore(dayjs());
         return <span style={{ color: over ? '#ff4d4f' : undefined }}>{dayjs(d).format('MM-DD HH:mm')}</span>;

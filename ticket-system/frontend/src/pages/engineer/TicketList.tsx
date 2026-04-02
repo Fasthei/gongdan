@@ -18,6 +18,8 @@ const NEXT_STATUS: Record<string, string> = {
   IN_PROGRESS: 'PENDING_CLOSE',
 };
 
+
+
 export default function EngineerTicketList() {
   const [tickets, setTickets] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -61,6 +63,16 @@ export default function EngineerTicketList() {
     }
   };
 
+  const handleSelfAssign = async (ticketId: string) => {
+    try {
+      await api.put(`/tickets/${ticketId}/self-assign`);
+      message.success('接单成功，工单已受理');
+      fetchTickets(page, statusFilter);
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '接单失败');
+    }
+  };
+
   const columns = [
     { title: '工单编号', dataIndex: 'ticketNumber', width: 150 },
     { title: '客户', key: 'customer', width: 120, render: (_: any, r: any) => r.customer?.name || '-' },
@@ -71,21 +83,22 @@ export default function EngineerTicketList() {
       render: (s: string) => <Tag color={STATUS_MAP[s]?.color}>{STATUS_MAP[s]?.label || s}</Tag>,
     },
     {
-      title: 'SLA', dataIndex: 'slaDeadline', width: 120,
+      title: 'SLO', dataIndex: 'slaDeadline', width: 120,
       render: (d: string) => {
         const over = dayjs(d).isBefore(dayjs());
         return <span style={{ color: over ? '#ff4d4f' : undefined }}>{dayjs(d).format('MM-DD HH:mm')}</span>;
       },
     },
     {
-      title: '操作', key: 'action', width: 200,
+      title: '操作', key: 'action', width: 240,
       render: (_: any, r: any) => (
         <Space size={4}>
           <Button size="small" onClick={() => navigate(`/engineer/tickets/${r.id}`)}>详情</Button>
-          {NEXT_STATUS[r.status] && (
-            <Button size="small" type="primary" onClick={() => handleStatusUpdate(r.id, NEXT_STATUS[r.status])}>
-              {r.status === 'ACCEPTED' ? '开始处理' : '申请关闭'}
-            </Button>
+          {r.status === 'PENDING' && (
+            <Button size="small" type="primary" onClick={() => handleSelfAssign(r.id)}>接单</Button>
+          )}
+          {r.status === 'ACCEPTED' && (
+            <Button size="small" type="primary" onClick={() => handleStatusUpdate(r.id, 'IN_PROGRESS')}>开始处理</Button>
           )}
           {r.status === 'IN_PROGRESS' && (
             <Button size="small" danger onClick={() => handleCloseRequest(r.id)}>申请关闭</Button>

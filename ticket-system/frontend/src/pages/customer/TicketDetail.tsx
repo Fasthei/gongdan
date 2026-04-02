@@ -39,7 +39,7 @@ export default function CustomerTicketDetail() {
         <Tag color={ticket.status === 'CLOSED' ? 'success' : 'processing'}>{STATUS_LABEL[ticket.status]}</Tag>
       </Space>
 
-      {isOverdue && <Alert message="该工单已超出 SLA 时限，请联系运营催单" type="warning" showIcon style={{ marginBottom: 16 }} />}
+      {isOverdue && <Alert message="该工单已超出 SLO 时限，请联系运营催单" type="warning" showIcon style={{ marginBottom: 16 }} />}
 
       <Card bordered={false} style={{ marginBottom: 16 }}>
         <Steps
@@ -67,7 +67,7 @@ export default function CustomerTicketDetail() {
           <Descriptions.Item label="负责工程师">
             {ticket.assignedEngineer ? `${ticket.assignedEngineer.username} (${ticket.assignedEngineer.level})` : '待分配'}
           </Descriptions.Item>
-          <Descriptions.Item label="SLA 截止">
+          <Descriptions.Item label="SLO 截止">
             <span style={{ color: isOverdue ? '#ff4d4f' : undefined }}>
               {dayjs(ticket.slaDeadline).format('YYYY-MM-DD HH:mm')}
             </span>

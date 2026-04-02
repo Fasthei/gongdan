@@ -49,6 +49,17 @@ export default function EngineerTicketDetail() {
     }
   };
 
+  const handleSelfAssign = async () => {
+    try {
+      await api.put(`/tickets/${id}/self-assign`);
+      message.success('接单成功，工单已受理');
+      const { data } = await api.get(`/tickets/${id}`);
+      setTicket(data.ticket || data);
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '接单失败');
+    }
+  };
+
   if (loading) return <Spin style={{ display: 'block', margin: '80px auto' }} />;
   if (!ticket) return <Alert message="工单不存在" type="error" style={{ margin: 24 }} />;
 
@@ -76,7 +87,7 @@ export default function EngineerTicketDetail() {
               {ticket.framework && <Descriptions.Item label="框架">{ticket.framework}</Descriptions.Item>}
               {ticket.networkEnv && <Descriptions.Item label="网络">{ticket.networkEnv}</Descriptions.Item>}
               {ticket.contactInfo && <Descriptions.Item label="联系方式">{ticket.contactInfo}</Descriptions.Item>}
-              <Descriptions.Item label="SLA 截止">
+              <Descriptions.Item label="SLO 截止">
                 {dayjs(ticket.slaDeadline).format('YYYY-MM-DD HH:mm')}
               </Descriptions.Item>
               <Descriptions.Item label="提交时间">
@@ -87,6 +98,9 @@ export default function EngineerTicketDetail() {
 
           <Card title="操作" bordered={false}>
             <Space>
+              {ticket.status === 'PENDING' && (
+                <Button type="primary" onClick={handleSelfAssign}>接单</Button>
+              )}
               {ticket.status === 'ACCEPTED' && (
                 <Button type="primary" onClick={() => handleStatusUpdate('IN_PROGRESS')}>开始处理</Button>
               )}

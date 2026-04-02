@@ -203,6 +203,35 @@ export class TicketService {
     });
   }
 
+  async selfAssign(ticketId: string, engineerId: string) {
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { customer: true },
+    });
+    if (!ticket) throw new NotFoundException('工单不存在');
+    if (ticket.status !== 'PENDING') throw new BadRequestException('只能接取待受理（PENDING）的工单');
+
+    const engineer = await this.prisma.engineer.findUnique({ where: { id: engineerId } });
+    if (!engineer) throw new NotFoundException('工程师不存在');
+    if (!engineer.isAvailable) throw new BadRequestException('当前接单状态为暂停，请先开启可接单');
+
+    if (ticket.customer.tier === 'EXCLUSIVE' && engineer.level === 'L1') {
+      throw new BadRequestException('专属客户工单需要 L2 或以上级别工程师');
+    }
+
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: {
+        assignedEngineerId: engineerId,
+        engineerLevel: engineer.level,
+        status: 'ACCEPTED',
+        acceptedAt: new Date(),
+        firstResponseAt: new Date(),
+      },
+      include: { assignedEngineer: { select: { username: true, level: true } } },
+    });
+  }
+
   async assignEngineer(ticketId: string, engineerId: string, operatorId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
