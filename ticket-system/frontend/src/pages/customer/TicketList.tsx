@@ -78,7 +78,7 @@ export default function CustomerTicketList() {
               提交工单
             </Button>
             <Button icon={<MessageOutlined />} onClick={() => navigate('/kb-chat')}>
-              知识库对话
+              WBChat Agent
             </Button>
           </Space>
         </Space>

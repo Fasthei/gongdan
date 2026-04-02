@@ -84,7 +84,7 @@ function App() {
               {/* 工程师路由 */}
               <Route path="/engineer/*" element={<PrivateRoute roles={['ENGINEER', 'ADMIN']}><EngineerDashboard /></PrivateRoute>} />
 
-              {/* 全角色知识库对话 */}
+              {/* 全角色WBChat Agent */}
               <Route path="/kb-chat" element={<PrivateRoute roles={['CUSTOMER', 'OPERATOR', 'ENGINEER', 'ADMIN']}><KnowledgeBaseChat /></PrivateRoute>} />
 
               <Route path="/unauthorized" element={<div style={{ padding: 40 }}>无权访问此页面</div>} />

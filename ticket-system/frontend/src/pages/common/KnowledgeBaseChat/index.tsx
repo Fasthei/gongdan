@@ -383,7 +383,7 @@ export default function KnowledgeBaseChat() {
                   <span style={{ color: accentColor }}>✦</span> Hello, {user?.username || 'User'}
                 </Title>
                 <Title level={1} style={{ color: titleColor, fontSize: 48, fontWeight: 400, marginTop: 0 }}>
-                  Knowledge Base Chat
+                  WBChat Agent
                 </Title>
                 <Alert type="info" message="已集成：12项流式标准能力，支持明暗主题切换以及工单系统返回按钮。" style={{ background: containerBg, border: `1px solid ${borderColor}`, color: textColor, marginTop: 24, borderRadius: 12 }} />
               </div>
@@ -531,7 +531,7 @@ export default function KnowledgeBaseChat() {
                 </Space>
                 <Space>
                   <Button type="text" style={{ color: accentColor, background: itemHoverBg, borderRadius: 20 }}>
-                    KB Agent <DownOutlined style={{ fontSize: 10 }} />
+                    WBChat Agent <DownOutlined style={{ fontSize: 10 }} />
                   </Button>
                   <Button 
                     type={input.trim() ? "primary" : "text"} 

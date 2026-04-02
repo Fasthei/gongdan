@@ -23,7 +23,7 @@ export default function OperatorDashboard() {
     { key: '/operator', icon: <UnorderedListOutlined />, label: <Link to="/operator">工单管理</Link> },
     { key: '/operator/customers', icon: <TeamOutlined />, label: <Link to="/operator/customers">客户管理</Link> },
     { key: '/operator/status', icon: <DashboardOutlined />, label: <Link to="/operator/status">服务状态</Link> },
-    { key: '/kb-chat', icon: <DashboardOutlined />, label: <Link to="/kb-chat">知识库对话</Link> },
+    { key: '/kb-chat', icon: <DashboardOutlined />, label: <Link to="/kb-chat">WBChat Agent</Link> },
   ];
 
   return (
