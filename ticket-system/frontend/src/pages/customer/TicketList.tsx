@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Button, Space, Typography, Card, Select } from 'antd';
+import { Table, Tag, Button, Space, Typography, Card, Select, Collapse, Pagination } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import dayjs from 'dayjs';
+import { groupTicketsByCreatedDate } from '../../utils/ticketGrouping';
 
 const { Title } = Typography;
 
@@ -62,6 +63,8 @@ export default function CustomerTicketList() {
       render: (_: any, r: any) => <Button type="link" onClick={() => navigate(`/tickets/${r.id}`)}>查看</Button>,
     },
   ];
+  const groups = groupTicketsByCreatedDate(tickets);
+  const defaultActiveKeys = groups.filter((g) => g.isToday).map((g) => g.key);
 
   return (
     <div style={{ maxWidth: 1100, margin: '24px auto', padding: '0 16px' }}>
@@ -79,13 +82,40 @@ export default function CustomerTicketList() {
             </Button>
           </Space>
         </Space>
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={tickets}
-          loading={loading}
-          pagination={{ current: page, total, pageSize: 20, onChange: setPage }}
+        <Collapse
+          defaultActiveKey={defaultActiveKeys}
+          items={groups.map((g) => ({
+            key: g.key,
+            label: (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  color: g.isToday ? '#1a73e8' : '#5f6368',
+                  fontWeight: g.isToday ? 600 : 500,
+                }}
+              >
+                <span>{g.label}</span>
+                <span>{g.items.length} 单</span>
+              </div>
+            ),
+            children: (
+              <div style={{ borderLeft: `3px solid ${g.isToday ? '#1a73e8' : '#d9e4ff'}`, paddingLeft: 8 }}>
+                <Table
+                  rowKey="id"
+                  columns={columns}
+                  dataSource={g.items}
+                  loading={loading}
+                  pagination={false}
+                />
+              </div>
+            ),
+          }))}
         />
+        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+          <Pagination current={page} total={total} pageSize={20} onChange={setPage} />
+        </div>
       </Card>
     </div>
   );

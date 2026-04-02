@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Button, Select, Space, message } from 'antd';
+import { Table, Tag, Button, Select, Space, message, Collapse, Pagination } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import dayjs from 'dayjs';
+import { groupTicketsByCreatedDate } from '../../utils/ticketGrouping';
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   PENDING:       { label: '待受理', color: 'default' },
@@ -93,6 +94,8 @@ export default function EngineerTicketList() {
       ),
     },
   ];
+  const groups = groupTicketsByCreatedDate(tickets);
+  const defaultActiveKeys = groups.filter((g) => g.isToday).map((g) => g.key);
 
   return (
     <div style={{ padding: '24px', background: '#fff', borderRadius: 8 }}>
@@ -103,13 +106,40 @@ export default function EngineerTicketList() {
           ))}
         </Select>
       </Space>
-      <Table
-        rowKey="id"
-        columns={columns}
-        dataSource={tickets}
-        loading={loading}
-        pagination={{ current: page, total, pageSize: 20, onChange: setPage }}
+      <Collapse
+        defaultActiveKey={defaultActiveKeys}
+        items={groups.map((g) => ({
+          key: g.key,
+          label: (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                color: g.isToday ? '#1a73e8' : '#5f6368',
+                fontWeight: g.isToday ? 600 : 500,
+              }}
+            >
+              <span>{g.label}</span>
+              <span>{g.items.length} 单</span>
+            </div>
+          ),
+          children: (
+            <div style={{ borderLeft: `3px solid ${g.isToday ? '#1a73e8' : '#d9e4ff'}`, paddingLeft: 8 }}>
+              <Table
+                rowKey="id"
+                columns={columns}
+                dataSource={g.items}
+                loading={loading}
+                pagination={false}
+              />
+            </div>
+          ),
+        }))}
       />
+      <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
+        <Pagination current={page} total={total} pageSize={20} onChange={setPage} />
+      </div>
     </div>
   );
 }
