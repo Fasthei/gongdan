@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { apiUrl, getApiOrigin } from '../config/apiBase';
+import { clearAuthStorage, getLoginPathByUser, getStoredUser } from '../services/authSession';
 
 const apiOrigin = getApiOrigin();
 const api = axios.create({
@@ -24,10 +25,23 @@ async function refreshAccessToken(refreshToken: string) {
   return refreshInFlight;
 }
 
-// 请求拦截器：自动附加 Token
+function handleAuthExpiredRedirect() {
+  const user = getStoredUser();
+  clearAuthStorage();
+  window.location.href = getLoginPathByUser(user);
+}
+
+// 请求拦截器：自动附加 Token（登录/刷新接口不加，避免干扰）
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  const url = String(config.url || '');
+  const isAuthEndpoint = url.includes('/auth/staff-login') ||
+    url.includes('/auth/customer-login') ||
+    url.includes('/auth/refresh') ||
+    url.includes('/auth/logout');
+  if (!isAuthEndpoint) {
+    const token = localStorage.getItem('accessToken');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  }
   return config;
 });
 
@@ -46,7 +60,7 @@ api.interceptors.response.use(
     const shouldRetry =
       isNetworkLike &&
       !original?._retry_network &&
-      (url.includes('/auth/customer-login') || url.includes('/auth/staff-login') || url.includes('/public/bing-background'));
+      url.includes('/public/bing-background');
 
     if (shouldRetry) {
       original._retry_network = 0;
@@ -58,21 +72,29 @@ api.interceptors.response.use(
       return api(original);
     }
 
-    if (error.response?.status === 401 && !original._retry) {
+    // 登录/刷新接口本身不走 token 自动刷新逻辑，直接抛出原始错误让业务层处理
+    const isAuthEndpoint = url.includes('/auth/staff-login') ||
+      url.includes('/auth/customer-login') ||
+      url.includes('/auth/refresh') ||
+      url.includes('/auth/logout');
+
+    if (error.response?.status === 401 && !original._retry && !isAuthEndpoint) {
       original._retry = true;
       const refreshToken = localStorage.getItem('refreshToken');
       if (refreshToken) {
         try {
           const data = await refreshAccessToken(refreshToken);
           localStorage.setItem('accessToken', data.accessToken);
+          if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+          if (data.user) localStorage.setItem('user', JSON.stringify(data.user));
           original.headers = original.headers || {};
           original.headers.Authorization = `Bearer ${data.accessToken}`;
           return api(original);
         } catch {
-          localStorage.clear();
-          window.location.href = '/login';
+          handleAuthExpiredRedirect();
         }
       }
+      handleAuthExpiredRedirect();
     }
 
     // 登录接口：把“无响应”显示为更明确的网络问题
