@@ -1,6 +1,8 @@
 import { getApiOrigin } from '../config/apiBase';
 import { KbEvent } from '../types/kbChat';
 
+const KB_CHAT_DISABLED = true;
+
 let cachedBase = '';
 
 function kbBaseCandidates() {
@@ -24,6 +26,9 @@ function withAuthHeaders(init?: RequestInit): RequestInit {
 }
 
 async function fetchKb(path: string, init?: RequestInit) {
+  if (KB_CHAT_DISABLED) {
+    throw new Error('WBChat Agent 已停用');
+  }
   const tries = cachedBase ? [cachedBase, ...kbBaseCandidates().filter((x) => x !== cachedBase)] : kbBaseCandidates();
   let lastError: any = null;
   for (const base of tries) {
@@ -44,6 +49,7 @@ async function fetchKb(path: string, init?: RequestInit) {
 }
 
 export async function getContracts() {
+  if (KB_CHAT_DISABLED) return { events: [] };
   return { events: ['metadata', 'messages', 'updates', 'values', 'end'] };
 }
 
@@ -145,6 +151,9 @@ export async function streamChat(
   payload: { session_id?: string; prompt: string; branch_id: string; metadata?: Record<string, any> },
   onEvent: (event: KbEvent) => void
 ) {
+  if (KB_CHAT_DISABLED) {
+    throw new Error('WBChat Agent 已停用');
+  }
   if (!payload.session_id) {
     throw new Error('session_id is required');
   }
