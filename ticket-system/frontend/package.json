@@ -9,6 +9,8 @@
   "dependencies": {
     "@ant-design/icons": "^5.0.0",
     "@assistant-ui/react": "^0.12.21",
+    "@langchain/core": "^1.1.38",
+    "@langchain/react": "^0.2.3",
     "antd": "^5.0.0",
     "axios": "^1.6.0",
     "dayjs": "^1.11.0",

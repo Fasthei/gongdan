@@ -1,229 +1,199 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Button, Typography, Space, message, List, Tag, Spin, Avatar, Modal, Upload, Select, Tooltip } from 'antd';
-import type { UploadFile } from 'antd/es/upload/interface';
+import React, { useState, useEffect, useRef } from 'react';
+import { Layout, Menu, Input, Button, Typography, Space, Avatar, ConfigProvider, theme, Tag } from 'antd';
 import {
-  RobotOutlined,
-  UserOutlined,
-  SendOutlined,
-  ReloadOutlined,
-  ArrowLeftOutlined,
-  PlusOutlined,
-  GlobalOutlined,
-  CodeOutlined,
-  CopyOutlined,
-  UploadOutlined,
-  InfoCircleOutlined,
-  DownloadOutlined,
-  DeleteOutlined,
+  MenuOutlined, PlusOutlined, SearchOutlined, StarOutlined, FolderOutlined,
+  SettingOutlined, SendOutlined, SlidersOutlined, DatabaseOutlined, DownOutlined,
+  UserOutlined, RobotOutlined, EditOutlined, MessageOutlined
 } from '@ant-design/icons';
+import { useStream } from '@langchain/react';
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import api from '../../../api/axios';
-import { apiUrl } from '../../../config/apiBase';
 import { useAuth } from '../../../contexts/AuthContext';
 
-const { TextArea } = Input;
-const { Title, Text } = Typography;
+const { Sider, Content } = Layout;
+const { Text, Title } = Typography;
 
-/** 与 Postman「Copy as cURL」一致的多行格式；勿加 shebang、set -e、-w 等，避免与真实请求不一致 */
-const CURL_EXAMPLE_TEMPLATE = `curl --location 'https://YOUR_RESOURCE.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview' \\
---header 'Content-Type: application/json' \\
---header 'Authorization: Bearer <API_KEY>' \\
---data '{
-        "messages": [
-            {
-                "role": "user",
-                "content": "你好"
-            }
-        ],
-        "max_completion_tokens": 16384,
-        "model": "你的部署名或模型名"
-    }'
-`;
-
-type ChatItem = { role: 'user' | 'assistant'; content: string; searchMode?: 'internal' | 'hybrid' };
-type ThinkRound = {
-  id: string;
-  question: string;
-  think: string;
-  searchMode: 'internal' | 'hybrid';
-  createdAt: string;
-};
-type DocAttachment = {
-  uid: string;
-  name: string;
-  status: 'uploading' | 'done' | 'error';
-  kind: 'word' | 'txt' | 'table' | 'image';
-  parsedText: string;
-  error?: string;
-};
-
-import { ChatSidebar } from './components/ChatSidebar';
-import { ChatMessageList } from './components/ChatMessageList';
-import { DocWorkspace } from './components/DocWorkspace';
-import { ChatRightPanel } from './components/ChatRightPanel';
-import { ChatInputArea } from './components/ChatInputArea';
-import { SandboxModal } from './components/SandboxModal';
-import { useKbChat } from './useKbChat';
-import { useAssistantRuntime } from './useAssistantRuntime';
-import { AssistantRuntimeProvider } from '@assistant-ui/react';
+// Gemini Dark Theme colors
+const bgColor = '#000000';
+const sidebarBg = '#1e1f20';
+const inputBg = '#282a2c';
+const textColor = '#e3e3e3';
 
 export default function KnowledgeBaseChat() {
-  const ctx = useKbChat();
-  const runtime = useAssistantRuntime(ctx);
-  const {
-    CURL_EXAMPLE_TEMPLATE,
-    aiSearchDepth,
-    aiSearchStreamText,
-    applyDocTemplate,
-    ask,
-    canAsk,
-    chat,
-    chatHistoryList,
-    customerCode,
-    deleteSession,
-    docAttachments,
-    docEvidenceSummary,
-    docGenLoading,
-    docGenMode,
-    docGenResult,
-    exampleFileList,
-    exampleModalOpen,
-    followUps,
-    getDocKind,
-    isCustomer,
-    llmThinkRef,
-    llmThinkText,
-    loading,
-    markdownComponents,
-    messagesRef,
-    question,
-    removeDocAttachment,
-    requestExampleText,
-    retrievalStatus,
-    runDocGeneration,
-    sandboxMode,
-    sandboxStatus,
-    searchMode,
-    selectedTicketIds,
-    selectedTickets,
-    sessionId,
-    setAiSearchDepth,
-    setChat,
-    setCustomerCode,
-    setDocAttachments,
-    setExampleFileList,
-    setExampleModalOpen,
-    setFollowUps,
-    setLlmThinkText,
-    setQuestion,
-    setRequestExampleText,
-    setSandboxMode,
-    setSearchMode,
-    setSelectedTicketIds,
-    setSelectedTickets,
-    setSessionId,
-    setSources,
-    setThinkHistory,
-    setTicketLoading,
-    setWorkspaceText,
-    shouldShowThinkPanel,
-    sources,
-    thinkHistory,
-    ticketLoading,
-    ticketOptions,
-    toggleDocGenMode,
-    user,
-    verifiedCode,
-    verifyCode,
-    workspaceText,
-    workspaceVisible,
-  } = ctx;
+  const { user } = useAuth();
+  const apiUrl = import.meta.env.VITE_KB_CHAT_API_ORIGIN || 'https://aichatgongdan-dna6ghavchd9h6e0.eastasia-01.azurewebsites.net';
+  
+  const stream = useStream({
+    apiUrl,
+    assistantId: 'kb-chat-agent',
+  });
+
+  const [input, setInput] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [stream.messages]);
+
+  const handleSend = () => {
+    if (!input.trim() || stream.isLoading) return;
+    stream.submit({ messages: [{ type: "human", content: input }] });
+    setInput('');
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const getTextContent = (msg: any) => {
+    if (typeof msg.content === 'string') return msg.content;
+    if (Array.isArray(msg.content)) {
+      return msg.content.map((c: any) => c.text || '').join('');
+    }
+    return '';
+  };
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', background: '#fff', margin: '0' }}>
-        {/* Header */}
-      <div style={{ padding: '20px 20px 10px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => window.history.back()} />
-          <Title level={5} style={{ margin: 0 }}>知识库对话</Title>
-        </Space>
-        <Space>
-          <Button
-            icon={<ReloadOutlined />}
-            size="small"
-            onClick={() => {
-              setChat([]);
-              setSources([]);
-              setFollowUps([]);
-              setLlmThinkText('');
-              setThinkHistory([]);
-              llmThinkRef.current = '';
-              setSessionId('');
-              localStorage.removeItem('kb-chat-history');
-              localStorage.removeItem('kb-chat-session-id');
-            }}
-          >
-            新会话
+    <ConfigProvider theme={{ algorithm: theme.darkAlgorithm, token: { colorBgBase: bgColor, colorTextBase: textColor, colorBorder: '#3c4043' } }}>
+      <Layout style={{ height: '100vh', display: 'flex', flexDirection: 'row', overflow: 'hidden', background: bgColor }}>
+        <Sider width={280} style={{ background: sidebarBg, padding: '16px 12px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 24, padding: '0 12px' }}>
+            <Button type="text" icon={<MenuOutlined />} style={{ color: '#e3e3e3', marginRight: 16 }} />
+            <span style={{ fontSize: 18, fontWeight: 500, color: '#fff' }}>Gemini Enterprise <Tag color="blue" style={{ borderRadius: 12, marginLeft: 8, background: '#1c2b41', color: '#a8c7fa', border: 'none' }}>Plus</Tag></span>
+          </div>
+
+          <Button type="text" icon={<EditOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
+            New chat
           </Button>
-        </Space>
-      </div>
+          <Button type="text" icon={<SearchOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
+            Search
+          </Button>
+          <Button type="text" icon={<StarOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 8, height: 40, borderRadius: 20 }}>
+            Starred
+          </Button>
+          <Button type="text" icon={<FolderOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 24, height: 40, borderRadius: 20 }}>
+            Library
+          </Button>
 
-      {isCustomer && !verifiedCode ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8f9fa' }}>
-          <div style={{ background: '#fff', padding: 40, borderRadius: 16, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', textAlign: 'center' }}>
-            <Title level={4} style={{ marginBottom: 24 }}>验证客户身份</Title>
-            <Space direction="vertical" size="large" style={{ width: 300 }}>
-              <Input
-                size="large"
-                value={customerCode}
-                onChange={(e) => setCustomerCode(e.target.value)}
-                placeholder="请输入您的客户编号"
+          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginBottom: 8, fontWeight: 600 }}>Projects</div>
+          <Button type="text" icon={<PlusOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', marginBottom: 24, height: 40, borderRadius: 20 }}>
+            New project
+          </Button>
+
+          <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginBottom: 8, fontWeight: 600 }}>Agents</div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Button type="text" style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>
+              <Space><Avatar size="small" src="https://api.dicebear.com/7.x/shapes/svg?seed=1" /> Deep Research</Space>
+            </Button>
+            <Button type="text" style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>
+              <Space><Avatar size="small" src="https://api.dicebear.com/7.x/shapes/svg?seed=2" /> Idea Generation <Tag color="blue" style={{ borderRadius: 10, scale: 0.8, background: '#1c2b41', color: '#a8c7fa', border: 'none' }}>Preview</Tag></Space>
+            </Button>
+            <Button type="text" style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>
+              <Space><Avatar size="small" src="https://api.dicebear.com/7.x/shapes/svg?seed=3" /> NotebookLM</Space>
+            </Button>
+            <Button type="text" icon={<PlusOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20, marginTop: 8 }}>
+              New agent
+            </Button>
+
+            <div style={{ padding: '0 12px', fontSize: 12, color: '#a0a0a0', marginTop: 24, marginBottom: 8, fontWeight: 600 }}>Chats</div>
+            <Button type="text" icon={<MessageOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>A3 Ultra H200 GPU purchase</Button>
+            <Button type="text" icon={<MessageOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>GCP Flex Commit</Button>
+            <Button type="text" icon={<MessageOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', width: '100%', height: 40, borderRadius: 20 }}>Vertex AI logging</Button>
+          </div>
+
+          <Button type="text" icon={<SettingOutlined />} style={{ color: '#e3e3e3', justifyContent: 'flex-start', height: 40, borderRadius: 20, marginTop: 'auto' }}>
+            Settings & help
+          </Button>
+        </Sider>
+
+        <Content style={{ display: 'flex', flexDirection: 'column', height: '100%', position: 'relative', flex: 1, background: bgColor }}>
+          <div style={{ position: 'absolute', top: 16, right: 24, zIndex: 10 }}>
+            <Avatar icon={<UserOutlined />} src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" />
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '40px 15%', display: 'flex', flexDirection: 'column' }}>
+            {stream.messages.length === 0 ? (
+              <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 800 }}>
+                <Title level={2} style={{ color: '#fff', fontWeight: 400 }}>
+                  <span style={{ color: '#a8c7fa' }}>✦</span> Hello, {user?.username || 'Yuan'}
+                </Title>
+                <Title level={1} style={{ color: '#fff', fontSize: 48, fontWeight: 400, marginTop: 0 }}>
+                  Let's get some work done!
+                </Title>
+              </div>
+            ) : (
+              <div style={{ maxWidth: 800, margin: '0 auto', width: '100%', paddingBottom: 120 }}>
+                {stream.messages.map((msg, i) => {
+                  if (HumanMessage.isInstance(msg)) {
+                    return (
+                      <div key={i} style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 24 }}>
+                        <div style={{ background: '#282a2c', padding: '12px 20px', borderRadius: '24px 24px 4px 24px', maxWidth: '80%', color: '#e3e3e3', fontSize: 16 }}>
+                          {getTextContent(msg)}
+                        </div>
+                      </div>
+                    );
+                  }
+                  if (AIMessage.isInstance(msg)) {
+                    return (
+                      <div key={i} style={{ display: 'flex', marginBottom: 32, alignItems: 'flex-start' }}>
+                        <Avatar icon={<RobotOutlined />} style={{ background: '#a8c7fa', color: '#000', marginRight: 16, flexShrink: 0 }} />
+                        <div style={{ color: '#e3e3e3', fontSize: 16, lineHeight: 1.6, flex: 1, overflow: 'hidden' }}>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {getTextContent(msg) || '...'}
+                          </ReactMarkdown>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: '0 15%', paddingBottom: 32, position: 'absolute', bottom: 0, width: '100%', background: 'linear-gradient(to top, #000000 70%, transparent)' }}>
+            <div style={{ maxWidth: 800, margin: '0 auto', background: '#1e1f20', borderRadius: 32, padding: '12px 16px', display: 'flex', flexDirection: 'column' }}>
+              <Input.TextArea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask anything, search your data, @mention or /tools"
+                autoSize={{ minRows: 1, maxRows: 6 }}
+                style={{ background: 'transparent', color: '#e3e3e3', fontSize: 16, boxShadow: 'none', border: 'none', resize: 'none' }}
               />
-              <Button type="primary" size="large" block onClick={verifyCode}>开始对话</Button>
-            </Space>
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-          <ChatSidebar ctx={ctx} />
-
-          <div
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              position: 'relative',
-              minHeight: 0,
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'row',
-                gap: workspaceVisible ? 16 : 24,
-                padding: '0 24px',
-                minHeight: 0,
-                maxWidth: 1200,
-                width: '100%',
-                margin: '0 auto',
-                alignItems: 'stretch',
-              }}
-            >
-              <ChatMessageList ctx={ctx} />
-              {workspaceVisible ? <DocWorkspace ctx={ctx} /> : null}
-              <ChatRightPanel ctx={ctx} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                <Space size={16}>
+                  <Button type="text" icon={<PlusOutlined />} style={{ color: '#e3e3e3', borderRadius: '50%' }} />
+                  <Button type="text" icon={<SlidersOutlined />} style={{ color: '#e3e3e3', borderRadius: '50%' }} />
+                  <Button type="text" icon={<DatabaseOutlined />} style={{ color: '#e3e3e3', borderRadius: '50%' }} />
+                </Space>
+                <Space>
+                  <Button type="text" style={{ color: '#a8c7fa', background: '#282a2c', borderRadius: 20 }}>
+                    3 Flash <DownOutlined style={{ fontSize: 10 }} />
+                  </Button>
+                  <Button 
+                    type={input.trim() ? "primary" : "text"} 
+                    icon={<SendOutlined />} 
+                    onClick={handleSend}
+                    loading={stream.isLoading}
+                    style={{ 
+                      borderRadius: '50%', 
+                      background: input.trim() ? '#a8c7fa' : 'transparent', 
+                      color: input.trim() ? '#000' : '#e3e3e3',
+                      borderColor: 'transparent'
+                    }} 
+                  />
+                </Space>
+              </div>
             </div>
-
-            <ChatInputArea ctx={ctx} />
           </div>
-        </div>
-      )}
-
-      <SandboxModal ctx={ctx} />
-    </div>
-    </AssistantRuntimeProvider>
+        </Content>
+      </Layout>
+    </ConfigProvider>
   );
 }
