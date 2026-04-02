@@ -82,6 +82,8 @@ export default function KnowledgeBaseChat() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [initError, setInitError] = useState<string>('');
+
   const init = useCallback(async () => {
     try {
       const [ctr, sess] = await Promise.all([getContracts(), listSessions()]);
@@ -94,8 +96,11 @@ export default function KnowledgeBaseChat() {
         setSessionId(created.id);
         setSessions([created]);
       }
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      setInitError(e?.message || '未知网络错误');
+      // @ts-ignore
+      message.error(`初始化失败: ${e?.message || '请检查控制台网络请求'}`);
+      setContracts({ events: [] }); // 兜底解除 Spin
     }
   }, []);
 
@@ -386,6 +391,7 @@ export default function KnowledgeBaseChat() {
                   WBChat Agent
                 </Title>
                 <Alert type="info" message="已集成：12项流式标准能力，支持明暗主题切换以及工单系统返回按钮。" style={{ background: containerBg, border: `1px solid ${borderColor}`, color: textColor, marginTop: 24, borderRadius: 12 }} />
+                {initError && <Alert type="error" message={`后端连接失败: ${initError}`} style={{ marginTop: 16, borderRadius: 12 }} />}
               </div>
             ) : (
               <div style={{ maxWidth: 900, margin: '0 auto', width: '100%', paddingBottom: 150 }}>
