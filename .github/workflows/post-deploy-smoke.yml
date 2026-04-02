@@ -1,0 +1,48 @@
+# 部署成功后手动触发，对生产（或预发）做最小冒烟。
+# 所需 Secrets（Repository secrets）：
+#   SMOKE_BASE_URL  — 例如 https://xxx.azurewebsites.net（不要尾斜杠）
+#   SMOKE_API_KEY   — 用于 scripts/api-key-integration-test.sh 的测试密钥（勿提交到代码库）
+#
+# 可选：若仅测健康检查，可只配 SMOKE_BASE_URL，并在下方取消 API Key 脚本步骤的注释策略。
+
+name: Post-deploy smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Health check
+        env:
+          BASE: ${{ secrets.SMOKE_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE:-}" ]; then
+            echo "Secret SMOKE_BASE_URL is not set."
+            exit 1
+          fi
+          echo "GET $BASE/api/health"
+          code=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 30 "$BASE/api/health")
+          echo "HTTP $code"
+          cat /tmp/health.json
+          test "$code" = "200"
+
+      - name: API Key integration script
+        env:
+          BASE_URL: ${{ secrets.SMOKE_BASE_URL }}
+          API_KEY: ${{ secrets.SMOKE_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_KEY:-}" ]; then
+            echo "SMOKE_API_KEY not set — skipping api-key-integration-test.sh (configure secret for full smoke)."
+            exit 0
+          fi
+          chmod +x ticket-system/scripts/api-key-integration-test.sh
+          ./ticket-system/scripts/api-key-integration-test.sh
