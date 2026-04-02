@@ -4,6 +4,12 @@
       "route": "/api/*",
       "allowedRoles": ["anonymous", "authenticated"],
       "rewrite": "https://gongdan-b5fzbtgteqd5gzfb.eastasia-01.azurewebsites.net/api/*"
+    },
+    {
+      "route": "/assets/*",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
     }
   ],
   "navigationFallback": {
