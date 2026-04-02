@@ -15,6 +15,26 @@ export class TicketService {
   // 工单内容不可变字段列表
   private readonly IMMUTABLE_FIELDS = ['platform', 'accountInfo', 'modelUsed', 'description', 'requestExample'];
 
+  // 每日工单上限（普通客户）
+  private readonly DAILY_TICKET_LIMIT = 10;
+
+  private async checkDailyLimit(customerId: string, tier: string) {
+    if (tier !== 'NORMAL') return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const count = await this.prisma.ticket.count({
+      where: {
+        customerId,
+        createdAt: { gte: today },
+      },
+    });
+    if (count >= this.DAILY_TICKET_LIMIT) {
+      throw new BadRequestException(
+        `普通客户每日最多创建 ${this.DAILY_TICKET_LIMIT} 个工单，今日已提交 ${count} 个，请明日再试或升级账户等级`,
+      );
+    }
+  }
+
   async create(dto: CreateTicketDto, creatorId: string, creatorRole: 'CUSTOMER' | 'OPERATOR') {
     let customerId = creatorId;
     if (creatorRole === 'OPERATOR') {
@@ -26,6 +46,7 @@ export class TicketService {
     if (customer.tier === 'NORMAL' && dto.requestedLevel) {
       throw new BadRequestException('普通客户不支持选择支持工程师等级');
     }
+    await this.checkDailyLimit(customerId, customer.tier);
 
     const slaDeadline = calculateSlaDeadline(customer.tier as any, new Date());
     const ticketNumber = generateTicketNumber();
@@ -74,6 +95,7 @@ export class TicketService {
     if (customer.tier === 'NORMAL' && dto.requestedLevel) {
       throw new BadRequestException('普通客户不支持选择支持工程师等级');
     }
+    await this.checkDailyLimit(customerId, customer.tier);
 
     const slaDeadline = calculateSlaDeadline(customer.tier as any, new Date());
     const ticketNumber = generateTicketNumber();
@@ -263,5 +285,77 @@ export class TicketService {
     return this.prisma.ticketUrge.create({
       data: { ticketId, urgedBy: operatorId, note },
     });
+  }
+
+  // ─── 工单留言板 ───────────────────────────────────────────────────────
+
+  async getMessages(ticketId: string, user: any) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('工单不存在');
+
+    // 客户只能查看自己工单的留言
+    if (user.role === 'CUSTOMER' && ticket.customerId !== user.id) {
+      throw new ForbiddenException('无权查看此工单留言');
+    }
+
+    return this.prisma.ticketMessage.findMany({
+      where: { ticketId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async addMessage(ticketId: string, content: string, user: any) {
+    if (!content?.trim()) throw new BadRequestException('留言内容不能为空');
+
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('工单不存在');
+
+    // 客户只能在自己工单留言
+    if (user.role === 'CUSTOMER' && ticket.customerId !== user.id) {
+      throw new ForbiddenException('无权在此工单留言');
+    }
+
+    // 已关闭工单只允许工程师和运营留言
+    if (ticket.status === 'CLOSED' && user.role === 'CUSTOMER') {
+      throw new BadRequestException('工单已关闭，客户无法继续留言');
+    }
+
+    const roleMap: Record<string, string> = {
+      CUSTOMER: 'CUSTOMER',
+      ENGINEER: 'ENGINEER',
+      ADMIN: 'ENGINEER',
+      OPERATOR: 'OPERATOR',
+    };
+
+    return this.prisma.ticketMessage.create({
+      data: {
+        ticketId,
+        authorId: user.id,
+        authorRole: roleMap[user.role] as any,
+        content: content.trim(),
+      },
+    });
+  }
+
+  async deleteMessage(messageId: string, user: any) {
+    const msg = await this.prisma.ticketMessage.findUnique({ where: { id: messageId } });
+    if (!msg) throw new NotFoundException('留言不存在');
+
+    // 只能删自己的留言，或管理员/运营可删任意留言
+    if (msg.authorId !== user.id && user.role !== 'ADMIN' && user.role !== 'OPERATOR') {
+      throw new ForbiddenException('无权删除此留言');
+    }
+
+    await this.prisma.ticketMessage.delete({ where: { id: messageId } });
+    return { success: true };
+  }
+
+  async getDailyTicketUsage(customerId: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const count = await this.prisma.ticket.count({
+      where: { customerId, createdAt: { gte: today } },
+    });
+    return { used: count, limit: this.DAILY_TICKET_LIMIT, remaining: Math.max(0, this.DAILY_TICKET_LIMIT - count) };
   }
 }

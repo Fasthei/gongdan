@@ -147,6 +147,7 @@ model Ticket {
   customer           Customer       @relation(fields: [customerId], references: [id])
   assignedEngineer   Engineer?      @relation("AssignedEngineer", fields: [assignedEngineerId], references: [id])
   urges              TicketUrge[]
+  messages           TicketMessage[]
 
   @@index([customerId])
   @@index([assignedEngineerId])
@@ -165,4 +166,25 @@ model TicketUrge {
   ticket    Ticket   @relation(fields: [ticketId], references: [id])
 
   @@index([ticketId])
+}
+
+enum MessageAuthorRole {
+  CUSTOMER
+  ENGINEER
+  OPERATOR
+}
+
+model TicketMessage {
+  id          String            @id @default(uuid())
+  ticketId    String
+  authorId    String
+  authorRole  MessageAuthorRole
+  content     String            @db.Text
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  ticket      Ticket            @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@index([createdAt])
 }

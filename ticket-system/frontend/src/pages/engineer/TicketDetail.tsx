@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Descriptions, Tag, Button, Space, Spin, Alert, List, Typography, Divider } from 'antd';
+import { Card, Descriptions, Tag, Button, Space, Spin, Alert, List, Typography, Divider, message } from 'antd';
 import { ArrowLeftOutlined, BulbOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
@@ -146,7 +146,7 @@ export default function EngineerTicketDetail() {
             )}
           </Card>
 
-          <TicketMessageBoard ticketId={ticket.id} status={ticket.status} />
+          <TicketMessageBoard ticketId={ticket.id} ticketStatus={ticket.status} />
         </div>
       </div>
     </div>

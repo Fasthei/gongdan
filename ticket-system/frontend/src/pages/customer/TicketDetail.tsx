@@ -4,6 +4,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
 import dayjs from 'dayjs';
+import TicketMessageBoard from '../../components/ticket/TicketMessageBoard';
 
 const { Title } = Typography;
 
@@ -76,6 +77,8 @@ export default function CustomerTicketDetail() {
           {ticket.closedAt && <Descriptions.Item label="关闭时间">{dayjs(ticket.closedAt).format('YYYY-MM-DD HH:mm')}</Descriptions.Item>}
         </Descriptions>
       </Card>
+
+      <TicketMessageBoard ticketId={ticket.id} ticketStatus={ticket.status} />
     </div>
   );
 }

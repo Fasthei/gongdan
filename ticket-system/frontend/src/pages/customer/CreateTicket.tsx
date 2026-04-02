@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Form, Input, Select, Button, Card, Upload, message, Typography, Space } from 'antd';
+import React, { useState, useEffect } from 'react';
+import { Form, Input, Select, Button, Card, Upload, message, Typography, Space, Alert, Progress } from 'antd';
 import { UploadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
@@ -9,13 +9,24 @@ const { Title } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
+const DAILY_LIMIT = 10;
+
 export default function CreateTicket() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [attachmentUrls, setAttachmentUrls] = useState<string[]>([]);
+  const [dailyUsage, setDailyUsage] = useState<{ used: number; limit: number; remaining: number } | null>(null);
   const navigate = useNavigate();
   const { user } = useAuth();
   const canSelectEngineerLevel = user?.role === 'CUSTOMER' && user?.tier !== 'NORMAL';
+  const isNormalTier = user?.role === 'CUSTOMER' && user?.tier === 'NORMAL';
+
+  useEffect(() => {
+    if (!isNormalTier) return;
+    api.get('/tickets/daily-usage/me')
+      .then(({ data }) => setDailyUsage(data))
+      .catch(() => {});
+  }, [isNormalTier]);
 
   const handleUpload = async (file: File) => {
     try {
@@ -40,6 +51,7 @@ export default function CreateTicket() {
       }
       await api.post('/tickets', payload);
       message.success('工单提交成功');
+      if (dailyUsage) setDailyUsage(prev => prev ? { ...prev, used: prev.used + 1, remaining: prev.remaining - 1 } : prev);
       navigate('/tickets');
     } catch (err: any) {
       message.error(err.response?.data?.message || '提交失败，请重试');
@@ -54,6 +66,24 @@ export default function CreateTicket() {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tickets')}>返回</Button>
         <Title level={4} style={{ margin: 0 }}>提交新工单</Title>
       </Space>
+
+      {isNormalTier && dailyUsage && (
+        <Card bordered={false} style={{ marginBottom: 16 }}>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <Space>
+              <span>今日工单用量：{dailyUsage.used} / {dailyUsage.limit}</span>
+              {dailyUsage.remaining === 0 && (
+                <Alert type="error" message="今日工单配额已用完，请明日再提交或联系运营升级账户" showIcon banner />
+              )}
+            </Space>
+            <Progress
+              percent={Math.round((dailyUsage.used / dailyUsage.limit) * 100)}
+              status={dailyUsage.remaining === 0 ? 'exception' : dailyUsage.remaining <= 2 ? 'active' : 'normal'}
+              format={() => `剩余 ${dailyUsage.remaining} 个`}
+            />
+          </Space>
+        </Card>
+      )}
 
       <Card bordered={false}>
         <Form form={form} layout="vertical" onFinish={onFinish}>
