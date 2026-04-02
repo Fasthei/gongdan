@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Descriptions, Tag, Button, Steps, Typography, Space, Spin, Alert } from 'antd';
+import { Card, Descriptions, Tag, Button, Steps, Typography, Space, Spin, Alert, Modal, message } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../../api/axios';
@@ -21,6 +21,26 @@ export default function CustomerTicketDetail() {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
+  const handleCustomerClose = () => {
+    Modal.confirm({
+      title: '确认关闭工单',
+      content: '关闭后工单将不可再修改，确认关闭吗？',
+      okText: '确认关闭',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await api.put(`/tickets/${id}/customer-close`);
+          message.success('工单已关闭');
+          const { data } = await api.get(`/tickets/${id}`);
+          setTicket(data);
+        } catch (err: any) {
+          message.error(err.response?.data?.message || '关闭失败，请重试');
+        }
+      },
+    });
+  };
+
   useEffect(() => {
     api.get(`/tickets/${id}`).then(({ data }) => setTicket(data)).finally(() => setLoading(false));
   }, [id]);
@@ -37,6 +57,9 @@ export default function CustomerTicketDetail() {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tickets')}>返回</Button>
         <Title level={4} style={{ margin: 0 }}>工单详情 — {ticket.ticketNumber}</Title>
         <Tag color={ticket.status === 'CLOSED' ? 'success' : 'processing'}>{STATUS_LABEL[ticket.status]}</Tag>
+        {ticket.status !== 'CLOSED' && (
+          <Button danger onClick={handleCustomerClose}>关闭工单</Button>
+        )}
       </Space>
 
       {isOverdue && <Alert message="该工单已超出 SLO 时限，请联系运营催单" type="warning" showIcon style={{ marginBottom: 16 }} />}

@@ -262,6 +262,18 @@ export class TicketService {
     });
   }
 
+  async customerClose(ticketId: string, customerId: string) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
+    if (!ticket) throw new NotFoundException('工单不存在');
+    if (ticket.customerId !== customerId) throw new ForbiddenException('无权操作此工单');
+    if (ticket.status === 'CLOSED') throw new BadRequestException('工单已关闭');
+
+    return this.prisma.ticket.update({
+      where: { id: ticketId },
+      data: { status: 'CLOSED', closedAt: new Date() },
+    });
+  }
+
   async requestClose(ticketId: string, engineerId: string) {
     const ticket = await this.prisma.ticket.findUnique({ where: { id: ticketId } });
     if (!ticket) throw new NotFoundException('工单不存在');

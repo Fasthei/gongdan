@@ -59,6 +59,12 @@ export class TicketController {
     return this.ticketService.assignEngineer(id, engineerId, req.user.id);
   }
 
+  @Put(':id/customer-close')
+  @Roles('CUSTOMER', 'ADMIN')
+  customerClose(@Param('id') id: string, @Request() req: any) {
+    return this.ticketService.customerClose(id, req.user.id);
+  }
+
   @Put(':id/close-request')
   @Roles('ENGINEER', 'ADMIN')
   closeRequest(@Param('id') id: string, @Request() req: any) {
