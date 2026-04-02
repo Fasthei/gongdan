@@ -1,13 +1,10 @@
 /**
- * 默认请求走相对路径 `/api`（本地 Vite 代理或已正确反代的 SWA）。
- * 若线上「WBChat Agent失败」且 Network 里 /api 返回 HTML 或非流式，可在构建时设置：
- *   VITE_API_ORIGIN=https://你的-backend.azurewebsites.net
- * （无尾部斜杠；不要带 /api，axios 会自行拼 /api）
+ * 请求基址。本地开发走 Vite 代理，生产走 SWA rewrite 或 VITE_API_ORIGIN 环境变量。
  */
 export function getApiOrigin(): string {
   const v = import.meta.env.VITE_API_ORIGIN;
   if (typeof v === 'string' && v.trim()) return v.replace(/\/$/, '').trim();
-  // fallback to backend host when SWA /api rewrite does not forward POST correctly
+  // fallback: SWA /api rewrite 不可用时直连 App Service
   return 'https://gongdan-b5fzbtgteqd5gzfb.eastasia-01.azurewebsites.net';
 }
 
