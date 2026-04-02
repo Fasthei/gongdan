@@ -5,7 +5,7 @@ import { clearAuthStorage, getLoginPathByUser, getStoredUser } from '../services
 const apiOrigin = getApiOrigin();
 const api = axios.create({
   baseURL: apiOrigin ? `${apiOrigin}/api` : '/api',
-  timeout: 20000,
+  timeout: 60000,
 });
 
 function sleep(ms: number) {
