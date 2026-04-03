@@ -25,12 +25,23 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
   const [input, setInput] = useState('');
   const [attachmentUrls, setAttachmentUrls] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const msgEndRef = useRef<HTMLDivElement>(null);
 
+  const loadMessages = async () => {
+    setListLoading(true);
+    try {
+      const { data } = await api.get('/tickets/' + ticketId + '/messages');
+      setMessages(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '留言加载失败');
+    } finally {
+      setListLoading(false);
+    }
+  };
+
   useEffect(() => {
-    api.get('/tickets/' + ticketId + '/messages')
-      .then(({ data }) => setMessages(data))
-      .catch(() => {});
+    void loadMessages();
   }, [ticketId]);
 
   useEffect(() => {
@@ -69,7 +80,14 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
   const handleUpload = async (file: File) => {
     try {
       const { data } = await api.post('/attachments/sas-token', { fileName: file.name });
-      await fetch(data.sasUrl, { method: 'PUT', body: file, headers: { 'x-ms-blob-type': 'BlockBlob' } });
+      const uploadRes = await fetch(data.sasUrl, {
+        method: 'PUT',
+        body: file,
+        headers: { 'x-ms-blob-type': 'BlockBlob' },
+      });
+      if (!uploadRes.ok) {
+        throw new Error(`upload failed: ${uploadRes.status}`);
+      }
       const url = data.sasUrl.split('?')[0];
       setAttachmentUrls((prev) => [...prev, url].slice(0, 5));
       message.success(`${file.name} 上传成功`);
@@ -82,7 +100,11 @@ export default function TicketMessageBoard({ ticketId, ticketStatus }: Props) {
   return (
     <Card bordered={false} title="工单留言板" style={{ marginTop: 16 }}>
       <div style={{ maxHeight: 400, overflowY: 'auto', marginBottom: 12 }}>
-        {messages.length === 0 ? (
+        {listLoading ? (
+          <Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: '24px 0' }}>
+            留言加载中...
+          </Text>
+        ) : messages.length === 0 ? (
           <Text type="secondary" style={{ display: 'block', textAlign: 'center', padding: '24px 0' }}>
             暂无留言，率先发言吧
           </Text>

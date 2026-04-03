@@ -18,6 +18,22 @@ export class TicketService {
   // 每日工单上限（普通客户）
   private readonly DAILY_TICKET_LIMIT = 3;
 
+  private getActorCustomerId(user: any) {
+    return user.customerId || user.id;
+  }
+
+  private assertTicketMessageAccess(ticket: any, user: any, action: '查看' | '留言') {
+    if (user.role === 'CUSTOMER' && ticket.customerId !== this.getActorCustomerId(user)) {
+      throw new ForbiddenException(`无权${action}此工单留言`);
+    }
+    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
+      throw new ForbiddenException(`无权${action}此工单留言`);
+    }
+    if (user.role === 'ENGINEER' && ticket.assignedEngineerId && ticket.assignedEngineerId !== user.id) {
+      throw new ForbiddenException(`无权${action}此工单留言`);
+    }
+  }
+
   private async checkDailyLimit(customerId: string, tier: string) {
     if (tier !== 'NORMAL') return;
     const today = new Date();
@@ -339,17 +355,7 @@ export class TicketService {
       include: { customer: { select: { createdBy: true } } },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-
-    // 客户只能查看自己工单的留言
-    if (user.role === 'CUSTOMER' && ticket.customerId !== user.id) {
-      throw new ForbiddenException('无权查看此工单留言');
-    }
-    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
-      throw new ForbiddenException('无权查看此工单留言');
-    }
-    if (user.role === 'ENGINEER' && ticket.assignedEngineerId && ticket.assignedEngineerId !== user.id) {
-      throw new ForbiddenException('无权查看此工单留言');
-    }
+    this.assertTicketMessageAccess(ticket, user, '查看');
 
     return this.prisma.ticketMessage.findMany({
       where: { ticketId },
@@ -365,17 +371,7 @@ export class TicketService {
       include: { customer: { select: { createdBy: true } } },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-
-    // 客户只能在自己工单留言
-    if (user.role === 'CUSTOMER' && ticket.customerId !== user.id) {
-      throw new ForbiddenException('无权在此工单留言');
-    }
-    if (user.role === 'OPERATOR' && ticket.customer?.createdBy !== user.id) {
-      throw new ForbiddenException('无权在此工单留言');
-    }
-    if (user.role === 'ENGINEER' && ticket.assignedEngineerId && ticket.assignedEngineerId !== user.id) {
-      throw new ForbiddenException('无权在此工单留言');
-    }
+    this.assertTicketMessageAccess(ticket, user, '留言');
 
     // 已关闭工单只允许工程师和运营留言
     if (ticket.status === 'CLOSED' && user.role === 'CUSTOMER') {
