@@ -65,18 +65,9 @@ jobs:
 
       - name: Run database migrations
         working-directory: ticket-system/backend
-        run: |
-          DATABASE_URL=$(az webapp config appsettings list \
-            --name gongdan \
-            --resource-group AuthData \
-            --query "[?name=='DATABASE_URL'].value" \
-            --output tsv)
-          if [ -z "$DATABASE_URL" ]; then
-            echo "ERROR: Could not retrieve DATABASE_URL from App Service settings"
-            exit 1
-          fi
-          export DATABASE_URL
-          npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy
 
       - uses: azure/webapps-deploy@v3
         with:
