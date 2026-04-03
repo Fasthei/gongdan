@@ -1,8 +1,11 @@
--- CreateEnum
-CREATE TYPE "MessageAuthorRole" AS ENUM ('CUSTOMER', 'ENGINEER', 'OPERATOR');
+-- CreateEnum (idempotent)
+DO $$ BEGIN
+  CREATE TYPE "MessageAuthorRole" AS ENUM ('CUSTOMER', 'ENGINEER', 'OPERATOR');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
 -- CreateTable
-CREATE TABLE "TicketMessage" (
+CREATE TABLE IF NOT EXISTS "TicketMessage" (
     "id" TEXT NOT NULL,
     "ticketId" TEXT NOT NULL,
     "authorId" TEXT NOT NULL,
@@ -16,10 +19,14 @@ CREATE TABLE "TicketMessage" (
 );
 
 -- CreateIndex
-CREATE INDEX "TicketMessage_ticketId_idx" ON "TicketMessage"("ticketId");
+CREATE INDEX IF NOT EXISTS "TicketMessage_ticketId_idx" ON "TicketMessage"("ticketId");
 
 -- CreateIndex
-CREATE INDEX "TicketMessage_createdAt_idx" ON "TicketMessage"("createdAt");
+CREATE INDEX IF NOT EXISTS "TicketMessage_createdAt_idx" ON "TicketMessage"("createdAt");
 
--- AddForeignKey
-ALTER TABLE "TicketMessage" ADD CONSTRAINT "TicketMessage_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "Ticket"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+-- AddForeignKey (idempotent)
+DO $$ BEGIN
+  ALTER TABLE "TicketMessage" ADD CONSTRAINT "TicketMessage_ticketId_fkey"
+    FOREIGN KEY ("ticketId") REFERENCES "Ticket"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
