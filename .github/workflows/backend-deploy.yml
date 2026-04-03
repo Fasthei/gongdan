@@ -46,6 +46,11 @@ jobs:
       - run: npx prisma generate
       - run: npm run build
 
+      - name: Run database migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy
+
       - name: Package for deployment
         run: |
           mkdir -p ../../deploy
