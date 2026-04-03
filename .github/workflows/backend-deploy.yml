@@ -51,10 +51,13 @@ jobs:
           mkdir -p ../../deploy
           cp -r dist ../../deploy/
           cp package.json ../../deploy/
+          cp package-lock.json ../../deploy/
           cp -r prisma ../../deploy/prisma
+          # Copy the already-generated Prisma client (includes TicketMessage model)
+          mkdir -p ../../deploy/node_modules/@prisma
+          cp -r node_modules/@prisma/client ../../deploy/node_modules/@prisma/client
           cd ../../deploy
           npm install --omit=dev
-          npx prisma generate
           zip -r ../backend.zip .
 
       - uses: azure/login@v2
