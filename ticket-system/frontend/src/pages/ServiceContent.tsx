@@ -125,7 +125,7 @@ export default function ServiceContentPage() {
         </>
       )}
 
-      {/* Section 13: Communication & Discipline */}
+      {/* Section 13: Service Guidelines */}
       {sectionCard(<SafetyCertificateOutlined style={{ color: '#ff4d4f' }} />, 'section13Title',
         renderTable('commHeader', [], ['commRows'])
       )}
@@ -133,22 +133,6 @@ export default function ServiceContentPage() {
       {/* Section 14: SLO Standards */}
       {sectionCard(<ThunderboltOutlined style={{ color: '#52c41a' }} />, 'section14Title',
         renderTable('sloHeader', [], ['sloNormal', 'sloKey', 'sloExclusive'])
-      )}
-
-      {/* Section 15: Organization */}
-      {sectionCard(<TeamOutlined style={{ color: '#722ed1' }} />, 'section15Title',
-        <>
-          <Paragraph>{sc('section15Intro')}</Paragraph>
-          {renderTable('orgHeader', [], ['orgL3', 'orgL2', 'orgL1'])}
-        </>
-      )}
-
-      {/* Section 16: Execution */}
-      {sectionCard(<FileTextOutlined />, 'section16Title',
-        <>
-          <Paragraph>{sc('section16Content1')}</Paragraph>
-          <Paragraph>{sc('section16Content2')}</Paragraph>
-        </>
       )}
     </div>
   );
