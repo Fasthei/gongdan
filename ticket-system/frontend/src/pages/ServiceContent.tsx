@@ -1,10 +1,12 @@
 import React from 'react';
-import { Card, Table, Typography, Tag, Steps, Divider, Alert, Space } from 'antd';
+import { Card, Table, Typography, Tag, Steps, Divider, Alert, Space, Tabs } from 'antd';
 import {
   BookOutlined, TeamOutlined, ThunderboltOutlined, OrderedListOutlined,
   SafetyCertificateOutlined, ApartmentOutlined, FileTextOutlined,
+  DashboardOutlined,
 } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import StatusBoard from './operator/StatusBoard';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -36,8 +38,8 @@ export default function ServiceContentPage() {
     return <Table columns={columns} dataSource={dataSource} pagination={false} size="small" bordered />;
   };
 
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto', padding: '24px 16px' }}>
+  const policyContent = (
+    <div style={{ maxWidth: 960, margin: '0 auto' }}>
       {/* Header */}
       <Card bordered={false} style={{ marginBottom: 24, textAlign: 'center' }}>
         <Title level={2} style={{ marginBottom: 16 }}>{sc('mainTitle')}</Title>
@@ -148,6 +150,27 @@ export default function ServiceContentPage() {
           <Paragraph>{sc('section16Content2')}</Paragraph>
         </>
       )}
+    </div>
+  );
+
+  return (
+    <div style={{ padding: '24px 16px' }}>
+      <Tabs
+        defaultActiveKey="status"
+        size="large"
+        items={[
+          {
+            key: 'status',
+            label: <span><DashboardOutlined style={{ marginRight: 6 }} />{t('statusBoard.title')}</span>,
+            children: <StatusBoard />,
+          },
+          {
+            key: 'policy',
+            label: <span><BookOutlined style={{ marginRight: 6 }} />{sc('mainTitle')}</span>,
+            children: policyContent,
+          },
+        ]}
+      />
     </div>
   );
 }
