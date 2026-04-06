@@ -2,8 +2,11 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import enUS from 'antd/locale/en_US';
 import { AuthProvider } from './contexts/AuthContext';
 import { PrivateRoute } from './components/PrivateRoute';
+import { useTranslation } from 'react-i18next';
+import './i18n';
 
 // 懒加载页面
 const CustomerLogin = React.lazy(() => import('./pages/CustomerLogin'));
@@ -14,11 +17,15 @@ const CustomerCreateTicket = React.lazy(() => import('./pages/customer/CreateTic
 const OperatorDashboard = React.lazy(() => import('./pages/operator/Dashboard'));
 const EngineerDashboard = React.lazy(() => import('./pages/engineer/Dashboard'));
 const StatusBoard = React.lazy(() => import('./pages/operator/StatusBoard'));
+const ServiceContent = React.lazy(() => import('./pages/ServiceContent'));
 
 function App() {
+  const { t, i18n } = useTranslation();
+  const antdLocale = i18n.language === 'en-US' ? enUS : zhCN;
+
   return (
     <ConfigProvider
-      locale={zhCN}
+      locale={antdLocale}
       theme={{
         token: {
           colorPrimary: '#1a73e8',
@@ -64,12 +71,13 @@ function App() {
     >
       <AuthProvider>
         <BrowserRouter>
-          <React.Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}>加载中...</div>}>
+          <React.Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}>{t('common.loading')}</div>}>
             <Routes>
               {/* 公开路由 */}
               <Route path="/login" element={<CustomerLogin />} />
               <Route path="/staff/login" element={<StaffLogin />} />
               <Route path="/status-board" element={<StatusBoard />} />
+              <Route path="/service-content" element={<ServiceContent />} />
               <Route path="/" element={<Navigate to="/login" replace />} />
 
               {/* 客户路由 */}
@@ -83,7 +91,7 @@ function App() {
               {/* 工程师路由 */}
               <Route path="/engineer/*" element={<PrivateRoute roles={['ENGINEER', 'ADMIN']}><EngineerDashboard /></PrivateRoute>} />
 
-              <Route path="/unauthorized" element={<div style={{ padding: 40 }}>无权访问此页面</div>} />
+              <Route path="/unauthorized" element={<div style={{ padding: 40 }}>{t('common.unauthorized')}</div>} />
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
           </React.Suspense>

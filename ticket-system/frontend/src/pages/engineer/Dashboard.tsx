@@ -4,6 +4,8 @@ import { Layout, Menu, Button, Typography, Switch, message, Form, Input, Select,
 import { UnorderedListOutlined, LogoutOutlined, SettingOutlined } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../api/axios';
+import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from '../../components/LanguageSwitcher';
 import TicketList from './TicketList';
 import TicketDetail from './TicketDetail';
 import ApiPermissionControl from './ApiPermissionControl';
@@ -16,6 +18,7 @@ export default function EngineerDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [available, setAvailable] = React.useState(true);
+  const { t } = useTranslation();
 
   const handleLogout = () => { logout(); navigate('/staff/login'); };
 
@@ -23,19 +26,19 @@ export default function EngineerDashboard() {
     try {
       await api.patch('/engineers/me/availability', { isAvailable: checked });
       setAvailable(checked);
-      message.success(checked ? '已设为可接单' : '已设为暂停接单');
+      message.success(checked ? t('engineer.availableSuccess') : t('engineer.unavailableSuccess'));
     } catch {
-      message.error('状态更新失败');
+      message.error(t('engineer.statusUpdateFailed'));
     }
   };
 
   const menuItems = [
-    { key: '/engineer', icon: <UnorderedListOutlined />, label: <Link to="/engineer">我的工单</Link> },
-    { key: '/engineer/settings', icon: <SettingOutlined />, label: <Link to="/engineer/settings">设置</Link> },
+    { key: '/engineer', icon: <UnorderedListOutlined />, label: <Link to="/engineer">{t('engineer.myTickets')}</Link> },
+    { key: '/engineer/settings', icon: <SettingOutlined />, label: <Link to="/engineer/settings">{t('engineer.settings')}</Link> },
     ...(user?.role === 'ADMIN'
       ? [
-          { key: '/engineer/admin/api-permissions', icon: <SettingOutlined />, label: <Link to="/engineer/admin/api-permissions">API 权限控制</Link> },
-          { key: '/engineer/admin', icon: <SettingOutlined />, label: <Link to="/engineer/admin">管理员账户管理</Link> },
+          { key: '/engineer/admin/api-permissions', icon: <SettingOutlined />, label: <Link to="/engineer/admin/api-permissions">{t('engineer.apiPermissions')}</Link> },
+          { key: '/engineer/admin', icon: <SettingOutlined />, label: <Link to="/engineer/admin">{t('engineer.adminAccounts')}</Link> },
         ]
       : []),
   ];
@@ -44,17 +47,18 @@ export default function EngineerDashboard() {
     <Layout style={{ minHeight: '100vh' }}>
       <Sider theme="light" width={240} style={{ borderRight: '1px solid #f0f0f0' }}>
         <div style={{ padding: '24px 16px', fontWeight: 'bold', fontSize: 18, color: '#1a73e8' }}>
-          工程师后台
+          {t('engineer.title')}
         </div>
         <Menu theme="light" mode="inline" selectedKeys={[location.pathname]} items={menuItems} style={{ borderRight: 'none' }} />
       </Sider>
       <Layout>
         <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f0f0f0' }}>
-          <Text>欢迎，{user?.username}（{user?.level}）</Text>
+          <Text>{t('common.welcome', { name: user?.username })}（{user?.level}）</Text>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <span>接单状态：</span>
-            <Switch checked={available} onChange={toggleAvailability} checkedChildren="可接单" unCheckedChildren="暂停" />
-            <Button icon={<LogoutOutlined />} onClick={handleLogout}>退出</Button>
+            <span>{t('engineer.availableStatus')}</span>
+            <Switch checked={available} onChange={toggleAvailability} checkedChildren={t('engineer.available')} unCheckedChildren={t('engineer.unavailable')} />
+            <LanguageSwitcher />
+            <Button icon={<LogoutOutlined />} onClick={handleLogout}>{t('common.logout')}</Button>
           </div>
         </Header>
         <Content style={{ margin: 24 }}>
@@ -76,33 +80,34 @@ function EngineerSettings() {
   const [pwdForm, setPwdForm] = React.useState({ oldPassword: '', newPassword: '', confirmPassword: '' });
   const [loading, setLoading] = React.useState(false);
   const [pwdLoading, setPwdLoading] = React.useState(false);
+  const { t } = useTranslation();
 
   const handleSave = async () => {
-    if (!form.email) return message.warning('请输入邮箱');
+    if (!form.email) return message.warning(t('engineerSettings.emailPlaceholder'));
     setLoading(true);
     try {
       await api.patch('/engineers/me/email', { email: form.email });
-      message.success('邮箱更新成功');
+      message.success(t('engineerSettings.emailSuccess'));
     } catch (err: any) {
-      message.error(err.response?.data?.message || '更新失败');
+      message.error(err.response?.data?.message || t('engineerSettings.emailFailed'));
     } finally {
       setLoading(false);
     }
   };
 
   const handleChangePassword = async () => {
-    if (!pwdForm.oldPassword || !pwdForm.newPassword) return message.warning('请填写完整密码信息');
-    if (pwdForm.newPassword !== pwdForm.confirmPassword) return message.warning('两次输入的新密码不一致');
+    if (!pwdForm.oldPassword || !pwdForm.newPassword) return message.warning(t('engineerSettings.passwordRequired'));
+    if (pwdForm.newPassword !== pwdForm.confirmPassword) return message.warning(t('engineerSettings.passwordMismatch'));
     setPwdLoading(true);
     try {
       await api.patch('/engineers/me/password', {
         oldPassword: pwdForm.oldPassword,
         newPassword: pwdForm.newPassword,
       });
-      message.success('密码修改成功');
+      message.success(t('engineerSettings.passwordSuccess'));
       setPwdForm({ oldPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err: any) {
-      message.error(err.response?.data?.message || '密码修改失败');
+      message.error(err.response?.data?.message || t('engineerSettings.passwordFailed'));
     } finally {
       setPwdLoading(false);
     }
@@ -110,38 +115,38 @@ function EngineerSettings() {
 
   return (
     <div style={{ maxWidth: 400 }}>
-      <Typography.Title level={5}>修改邮箱</Typography.Title>
+      <Typography.Title level={5}>{t('engineerSettings.changeEmail')}</Typography.Title>
       <input
         type="email"
-        placeholder="新邮箱地址"
+        placeholder={t('engineerSettings.emailPlaceholder')}
         value={form.email}
         onChange={e => setForm({ email: e.target.value })}
         style={{ width: '100%', padding: '8px 12px', marginBottom: 12, border: '1px solid #d9d9d9', borderRadius: 6 }}
       />
-      <Button type="primary" onClick={handleSave} loading={loading}>保存</Button>
+      <Button type="primary" onClick={handleSave} loading={loading}>{t('common.save')}</Button>
 
       <Divider />
 
-      <Typography.Title level={5}>修改密码</Typography.Title>
+      <Typography.Title level={5}>{t('engineerSettings.changePassword')}</Typography.Title>
       <Input.Password
-        placeholder="旧密码"
+        placeholder={t('engineerSettings.oldPassword')}
         value={pwdForm.oldPassword}
         onChange={e => setPwdForm({ ...pwdForm, oldPassword: e.target.value })}
         style={{ marginBottom: 8 }}
       />
       <Input.Password
-        placeholder="新密码"
+        placeholder={t('engineerSettings.newPassword')}
         value={pwdForm.newPassword}
         onChange={e => setPwdForm({ ...pwdForm, newPassword: e.target.value })}
         style={{ marginBottom: 8 }}
       />
       <Input.Password
-        placeholder="确认新密码"
+        placeholder={t('engineerSettings.confirmPassword')}
         value={pwdForm.confirmPassword}
         onChange={e => setPwdForm({ ...pwdForm, confirmPassword: e.target.value })}
         style={{ marginBottom: 12 }}
       />
-      <Button type="primary" onClick={handleChangePassword} loading={pwdLoading}>更新密码</Button>
+      <Button type="primary" onClick={handleChangePassword} loading={pwdLoading}>{t('engineerSettings.savePassword')}</Button>
     </div>
   );
 }
