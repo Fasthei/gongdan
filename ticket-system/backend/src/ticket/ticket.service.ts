@@ -68,6 +68,7 @@ export class TicketService {
     const ticketNumber = generateTicketNumber();
     const priority = customer.tier === 'EXCLUSIVE' ? 'EXCLUSIVE' : customer.tier === 'KEY' ? 'PRIORITY' : 'NORMAL';
 
+    const phase = dto.assistancePhase ?? 'POSTSALES';
     const createdTicket = await this.prisma.ticket.create({
       data: {
         ticketNumber,
@@ -76,6 +77,7 @@ export class TicketService {
         createdByRole: creatorRole,
         status: 'PENDING',
         priority: priority as any,
+        assistancePhase: phase as any,
         platform: dto.platform as any,
         accountInfo: dto.accountInfo,
         modelUsed: dto.modelUsed,
@@ -105,9 +107,12 @@ export class TicketService {
     return createdTicket;
   }
 
-  async createForCustomer(dto: CreateTicketDto, customerId: string, operatorId: string) {
+  async createForCustomer(dto: CreateTicketDto, customerId: string, operatorId: string, operatorRole: string) {
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) throw new NotFoundException('客户不存在');
+    if (operatorRole === 'OPERATOR' && customer.createdBy !== operatorId) {
+      throw new ForbiddenException('只能为您创建的客户发起工单');
+    }
     if (customer.tier === 'NORMAL' && dto.requestedLevel) {
       throw new BadRequestException('普通客户不支持选择支持工程师等级');
     }
@@ -117,6 +122,7 @@ export class TicketService {
     const ticketNumber = generateTicketNumber();
     const priority = customer.tier === 'EXCLUSIVE' ? 'EXCLUSIVE' : customer.tier === 'KEY' ? 'PRIORITY' : 'NORMAL';
 
+    const phase = dto.assistancePhase ?? 'POSTSALES';
     const createdTicket = await this.prisma.ticket.create({
       data: {
         ticketNumber,
@@ -125,6 +131,7 @@ export class TicketService {
         createdByRole: 'OPERATOR',
         status: 'PENDING',
         priority: priority as any,
+        assistancePhase: phase as any,
         platform: dto.platform as any,
         accountInfo: dto.accountInfo,
         modelUsed: dto.modelUsed,
@@ -153,12 +160,15 @@ export class TicketService {
     return createdTicket;
   }
 
-  async findAll(user: any, page = 1, pageSize = 20, status?: string) {
+  async findAll(user: any, page = 1, pageSize = 20, status?: string, assistancePhase?: string) {
     const take = Math.min(pageSize, 100);
     const skip = (page - 1) * take;
     const where: any = {};
 
     if (status) where.status = status;
+    if (assistancePhase === 'PRESALES' || assistancePhase === 'POSTSALES') {
+      where.assistancePhase = assistancePhase;
+    }
 
     if (user.role === 'CUSTOMER') {
       where.customerId = user.customerId;

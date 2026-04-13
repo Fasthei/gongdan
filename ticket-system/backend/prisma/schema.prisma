@@ -58,6 +58,12 @@ enum CreatedByRole {
   OPERATOR
 }
 
+/// 运营发起工单时：需要技术协助的工作性质（售前 / 售后）
+enum AssistancePhase {
+  PRESALES
+  POSTSALES
+}
+
 model Customer {
   id               String       @id @default(uuid())
   customerCode     String       @unique
@@ -116,6 +122,7 @@ model Ticket {
   engineerLevel      EngineerLevel?
   status             TicketStatus   @default(PENDING)
   priority           TicketPriority @default(NORMAL)
+  assistancePhase    AssistancePhase @default(POSTSALES)
 
   // 工单内容（不可修改）
   platform           Platform

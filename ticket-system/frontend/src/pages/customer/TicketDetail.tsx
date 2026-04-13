@@ -75,6 +75,9 @@ export default function CustomerTicketDetail() {
       <Card title="工单信息" bordered={false} style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="平台">{PLATFORM_LABEL[ticket.platform] || ticket.platform}</Descriptions.Item>
+          <Descriptions.Item label="售前/售后">
+            {ticket.assistancePhase === 'PRESALES' ? '售前' : '售后'}
+          </Descriptions.Item>
           <Descriptions.Item label="使用模型">{ticket.modelUsed}</Descriptions.Item>
           <Descriptions.Item label="账号信息" span={2}>{ticket.accountInfo}</Descriptions.Item>
           <Descriptions.Item label="问题描述" span={2}><pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{ticket.description}</pre></Descriptions.Item>

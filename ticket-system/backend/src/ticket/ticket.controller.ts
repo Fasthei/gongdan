@@ -23,7 +23,7 @@ export class TicketController {
     @Body() dto: CreateTicketDto,
     @Request() req: any,
   ) {
-    return this.ticketService.createForCustomer(dto, customerId, req.user.id);
+    return this.ticketService.createForCustomer(dto, customerId, req.user.id, req.user.role);
   }
 
   @Get()
@@ -32,8 +32,9 @@ export class TicketController {
     @Query('page') page = '1',
     @Query('pageSize') pageSize = '20',
     @Query('status') status?: string,
+    @Query('assistancePhase') assistancePhase?: string,
   ) {
-    return this.ticketService.findAll(req.user, parseInt(page), parseInt(pageSize), status);
+    return this.ticketService.findAll(req.user, parseInt(page), parseInt(pageSize), status, assistancePhase);
   }
 
   @Get(':id')

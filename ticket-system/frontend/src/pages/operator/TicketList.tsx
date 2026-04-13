@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Select, Modal, message, Tooltip, Badge, Collapse, Pagination } from 'antd';
-import { BellOutlined } from '@ant-design/icons';
+import { BellOutlined, FormOutlined } from '@ant-design/icons';
+import { Link } from 'react-router-dom';
 import api from '../../api/axios';
 import dayjs from 'dayjs';
 import { groupTicketsByCreatedDate } from '../../utils/ticketGrouping';
@@ -19,15 +20,17 @@ export default function OperatorTicketList() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [phaseFilter, setPhaseFilter] = useState<string | undefined>();
   const [engineers, setEngineers] = useState<any[]>([]);
   const [assignModal, setAssignModal] = useState<{ open: boolean; ticketId: string }>({ open: false, ticketId: '' });
   const [selectedEngineer, setSelectedEngineer] = useState<string>('');
 
-  const fetchTickets = async (p = 1, status?: string) => {
+  const fetchTickets = async (p = 1, status?: string, phase?: string) => {
     setLoading(true);
     try {
       const params: any = { page: p, pageSize: 20 };
       if (status) params.status = status;
+      if (phase) params.assistancePhase = phase;
       const { data } = await api.get('/tickets', { params });
       setTickets(data.tickets);
       setTotal(data.total);
@@ -41,7 +44,7 @@ export default function OperatorTicketList() {
     setEngineers(data);
   };
 
-  useEffect(() => { fetchTickets(page, statusFilter); }, [page, statusFilter]);
+  useEffect(() => { fetchTickets(page, statusFilter, phaseFilter); }, [page, statusFilter, phaseFilter]);
   useEffect(() => { fetchEngineers(); }, []);
 
   const handleAssign = async () => {
@@ -50,7 +53,7 @@ export default function OperatorTicketList() {
       await api.put(`/tickets/${assignModal.ticketId}/assign`, { engineerId: selectedEngineer });
       message.success('分配成功');
       setAssignModal({ open: false, ticketId: '' });
-      fetchTickets(page, statusFilter);
+      fetchTickets(page, statusFilter, phaseFilter);
     } catch (err: any) {
       message.error(err.response?.data?.message || '分配失败');
     }
@@ -63,7 +66,7 @@ export default function OperatorTicketList() {
       onOk: async () => {
         await api.put(`/tickets/${ticketId}/close-approve`);
         message.success('工单已关闭');
-        fetchTickets(page, statusFilter);
+        fetchTickets(page, statusFilter, phaseFilter);
       },
     });
   };
@@ -71,7 +74,7 @@ export default function OperatorTicketList() {
   const handleRejectClose = async (ticketId: string) => {
     await api.put(`/tickets/${ticketId}/close-reject`);
     message.success('已驳回，工单回到处理中');
-    fetchTickets(page, statusFilter);
+    fetchTickets(page, statusFilter, phaseFilter);
   };
 
   const handleUrge = async (ticketId: string) => {
@@ -83,6 +86,14 @@ export default function OperatorTicketList() {
     { title: '工单编号', dataIndex: 'ticketNumber', width: 150 },
     { title: '客户', key: 'customer', width: 120, render: (_: any, r: any) => `${r.customer?.name || '-'} (${r.customer?.tier || '-'})` },
     { title: '平台', dataIndex: 'platform', width: 80 },
+    {
+      title: '类型', key: 'phase', width: 80,
+      render: (_: any, r: any) => (
+        <Tag color={r.assistancePhase === 'PRESALES' ? 'blue' : 'default'}>
+          {r.assistancePhase === 'PRESALES' ? '售前' : '售后'}
+        </Tag>
+      ),
+    },
     { title: '问题描述', dataIndex: 'description', ellipsis: true },
     {
       title: '状态', dataIndex: 'status', width: 120,
@@ -125,11 +136,18 @@ export default function OperatorTicketList() {
   return (
     <div style={{ padding: '24px', background: '#fff', borderRadius: 8 }}>
       <Space style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between' }}>
-        <Space>
+        <Space wrap>
+          <Link to="/operator/create-ticket">
+            <Button type="primary" icon={<FormOutlined />}>打工单</Button>
+          </Link>
           <Select placeholder="筛选状态" allowClear style={{ width: 140 }} onChange={setStatusFilter}>
             {Object.entries(STATUS_MAP).map(([k, v]) => (
               <Select.Option key={k} value={k}>{v.label}</Select.Option>
             ))}
+          </Select>
+          <Select placeholder="售前/售后" allowClear style={{ width: 120 }} onChange={setPhaseFilter}>
+            <Select.Option value="PRESALES">售前</Select.Option>
+            <Select.Option value="POSTSALES">售后</Select.Option>
           </Select>
           <Badge count={tickets.filter(t => t.status === 'PENDING_CLOSE').length} offset={[4, 0]}>
             <span style={{ color: '#faad14', fontWeight: 500, marginLeft: 8 }}>待审批关闭</span>

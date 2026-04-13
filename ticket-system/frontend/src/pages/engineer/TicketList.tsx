@@ -26,13 +26,15 @@ export default function EngineerTicketList() {
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
+  const [phaseFilter, setPhaseFilter] = useState<string | undefined>();
   const navigate = useNavigate();
 
-  const fetchTickets = async (p = 1, status?: string) => {
+  const fetchTickets = async (p = 1, status?: string, phase?: string) => {
     setLoading(true);
     try {
       const params: any = { page: p, pageSize: 20 };
       if (status) params.status = status;
+      if (phase) params.assistancePhase = phase;
       const { data } = await api.get('/tickets', { params });
       setTickets(data.tickets);
       setTotal(data.total);
@@ -41,13 +43,13 @@ export default function EngineerTicketList() {
     }
   };
 
-  useEffect(() => { fetchTickets(page, statusFilter); }, [page, statusFilter]);
+  useEffect(() => { fetchTickets(page, statusFilter, phaseFilter); }, [page, statusFilter, phaseFilter]);
 
   const handleStatusUpdate = async (ticketId: string, newStatus: string) => {
     try {
       await api.put(`/tickets/${ticketId}/status`, { status: newStatus });
       message.success('状态已更新');
-      fetchTickets(page, statusFilter);
+      fetchTickets(page, statusFilter, phaseFilter);
     } catch (err: any) {
       message.error(err.response?.data?.message || '更新失败');
     }
@@ -57,7 +59,7 @@ export default function EngineerTicketList() {
     try {
       await api.put(`/tickets/${ticketId}/close-request`);
       message.success('已申请关闭，等待运营审批');
-      fetchTickets(page, statusFilter);
+      fetchTickets(page, statusFilter, phaseFilter);
     } catch (err: any) {
       message.error(err.response?.data?.message || '申请失败');
     }
@@ -67,7 +69,7 @@ export default function EngineerTicketList() {
     try {
       await api.put(`/tickets/${ticketId}/self-assign`);
       message.success('接单成功，工单已受理');
-      fetchTickets(page, statusFilter);
+      fetchTickets(page, statusFilter, phaseFilter);
     } catch (err: any) {
       message.error(err.response?.data?.message || '接单失败');
     }
@@ -77,6 +79,14 @@ export default function EngineerTicketList() {
     { title: '工单编号', dataIndex: 'ticketNumber', width: 150 },
     { title: '客户', key: 'customer', width: 120, render: (_: any, r: any) => r.customer?.name || '-' },
     { title: '平台', dataIndex: 'platform', width: 80 },
+    {
+      title: '类型', key: 'phase', width: 80,
+      render: (_: any, r: any) => (
+        <Tag color={r.assistancePhase === 'PRESALES' ? 'blue' : 'default'}>
+          {r.assistancePhase === 'PRESALES' ? '售前' : '售后'}
+        </Tag>
+      ),
+    },
     { title: '问题描述', dataIndex: 'description', ellipsis: true },
     {
       title: '状态', dataIndex: 'status', width: 120,
@@ -112,11 +122,15 @@ export default function EngineerTicketList() {
 
   return (
     <div style={{ padding: '24px', background: '#fff', borderRadius: 8 }}>
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Select placeholder="筛选状态" allowClear style={{ width: 140 }} onChange={setStatusFilter}>
           {Object.entries(STATUS_MAP).map(([k, v]) => (
             <Select.Option key={k} value={k}>{v.label}</Select.Option>
           ))}
+        </Select>
+        <Select placeholder="售前/售后" allowClear style={{ width: 120 }} onChange={setPhaseFilter}>
+          <Select.Option value="PRESALES">售前</Select.Option>
+          <Select.Option value="POSTSALES">售后</Select.Option>
         </Select>
       </Space>
       <Collapse

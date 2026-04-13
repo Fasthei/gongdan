@@ -2,7 +2,7 @@ import React from 'react';
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Layout, Menu, Button, Typography } from 'antd';
 import {
-  UnorderedListOutlined, TeamOutlined, LogoutOutlined, DashboardOutlined,
+  UnorderedListOutlined, TeamOutlined, LogoutOutlined, DashboardOutlined, FormOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import LanguageSwitcher from '../../components/LanguageSwitcher';
 import TicketList from './TicketList';
 import CustomerManage from './CustomerManage';
 import StatusBoard from './StatusBoard';
+import OperatorCreateTicket from './CreateTicket';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -24,6 +25,7 @@ export default function OperatorDashboard() {
 
   const menuItems = [
     { key: '/operator', icon: <UnorderedListOutlined />, label: <Link to="/operator">{t('operator.ticketManagement')}</Link> },
+    { key: '/operator/create-ticket', icon: <FormOutlined />, label: <Link to="/operator/create-ticket">打工单</Link> },
     { key: '/operator/customers', icon: <TeamOutlined />, label: <Link to="/operator/customers">{t('operator.customerManagement')}</Link> },
     { key: '/operator/status', icon: <DashboardOutlined />, label: <Link to="/operator/status">{t('operator.serviceStatus')}</Link> },
   ];
@@ -47,6 +49,7 @@ export default function OperatorDashboard() {
         <Content style={{ margin: 24 }}>
           <Routes>
             <Route path="/" element={<TicketList />} />
+            <Route path="/create-ticket" element={<OperatorCreateTicket />} />
             <Route path="/customers" element={<CustomerManage />} />
             <Route path="/status" element={<StatusBoard />} />
           </Routes>
