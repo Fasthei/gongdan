@@ -43,6 +43,12 @@ const zhCN = {
     staffLoginLink: '运营 / 技术人员登录',
     customerLoginLink: '客户登录',
     viewStatusBoard: '查看服务看板（免登录）',
+    casdoorLogin: '使用统一认证中心登录',
+    casdoorHint: '将跳转至统一认证中心完成身份验证',
+    callbackProcessing: '正在完成统一认证中心登录，请稍候…',
+    callbackMissingParams: '回调参数缺失，登录未完成',
+    callbackStateMismatch: '会话状态校验失败，请重新登录',
+    backToLogin: '返回登录页',
   },
 
   // === Ticket Status ===

@@ -1,19 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Form, Input, Button, Alert, Typography } from 'antd';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
+import { Card, Button, Alert, Typography, Space } from 'antd';
+import { Link } from 'react-router-dom';
 import api from '../api/axios';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 
 const { Title, Text } = Typography;
 
+/**
+ * Staff 登录页：统一走 Casdoor SSO。
+ * 流程：点击按钮 → 后端返回授权 URL → 浏览器跳转 Casdoor →
+ *      Casdoor 回调 /staff/auth/callback → AuthCallback 页面完成 token 换取。
+ */
 export default function StaffLogin() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [bgUrl, setBgUrl] = useState('');
-  const { login } = useAuth();
-  const navigate = useNavigate();
   const { t } = useTranslation();
 
   useEffect(() => {
@@ -26,29 +28,17 @@ export default function StaffLogin() {
     return () => { active = false; };
   }, []);
 
-  const onFinish = async ({ username, password }: { username: string; password: string }) => {
+  const onCasdoorLogin = async () => {
     setLoading(true);
     setError('');
     try {
-      if (!navigator.onLine) throw new Error(t('common.networkError'));
-      let data: any;
-      try {
-        const res = await api.post('/auth/staff-login', { username, password }, { timeout: 8000 });
-        data = res.data;
-      } catch (e: any) {
-        const code = e?.code;
-        const networkLike = !e?.response || code === 'ECONNABORTED';
-        if (!networkLike) throw e;
-        const retryRes = await api.post('/auth/staff-login', { username, password }, { timeout: 8000 });
-        data = retryRes.data;
-      }
-      login(data.accessToken, data.refreshToken, data.user);
-      const role = data.user?.role;
-      if (role === 'OPERATOR') navigate('/operator');
-      else navigate('/engineer');
+      const { data } = await api.get('/auth/staff/casdoor/authorize-url', { timeout: 8000 });
+      if (!data?.url) throw new Error('未取得 Casdoor 授权地址');
+      // state 同时放入 sessionStorage，回调页做双保险校验
+      if (data.state) sessionStorage.setItem('casdoor_state', data.state);
+      window.location.href = data.url;
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || t('login.loginFailed'));
-    } finally {
       setLoading(false);
     }
   };
@@ -71,20 +61,21 @@ export default function StaffLogin() {
           <Text type="secondary">{t('login.staffLogin')}</Text>
         </div>
         {error && <Alert message={error} type="error" showIcon style={{ marginBottom: 16 }} />}
-        <Form onFinish={onFinish} layout="vertical">
-          <Form.Item name="username" label={t('login.username')} rules={[{ required: true }]}>
-            <Input placeholder={t('login.enterUsername')} size="large" />
-          </Form.Item>
-          <Form.Item name="password" label={t('login.password')} rules={[{ required: true }]}>
-            <Input.Password placeholder={t('login.enterPassword')} size="large" />
-          </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={loading} block size="large">
-              {t('common.login')}
-            </Button>
-          </Form.Item>
-        </Form>
-        <div style={{ textAlign: 'center' }}>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Button
+            type="primary"
+            size="large"
+            block
+            loading={loading}
+            onClick={onCasdoorLogin}
+          >
+            {t('login.casdoorLogin')}
+          </Button>
+          <Text type="secondary" style={{ display: 'block', textAlign: 'center', fontSize: 12 }}>
+            {t('login.casdoorHint')}
+          </Text>
+        </Space>
+        <div style={{ textAlign: 'center', marginTop: 24 }}>
           <Link to="/login">{t('login.customerLoginLink')}</Link>
           <span style={{ margin: '0 8px', color: '#d9d9d9' }}>|</span>
           <Link to="/service-content">{t('login.viewStatusBoard')}</Link>

@@ -88,7 +88,8 @@ model Engineer {
   id          String        @id @default(uuid())
   username    String        @unique
   email       String        @unique
-  passwordHash String
+  passwordHash String?
+  casdoorId   String?       @unique
   level       EngineerLevel @default(L1)
   role        EngineerRole  @default(ENGINEER)
   isAvailable Boolean       @default(true)
@@ -100,16 +101,20 @@ model Engineer {
   boundCustomers   Customer[] @relation("BoundEngineer")
 
   @@index([level, isAvailable])
+  @@index([casdoorId])
 }
 
 model Operator {
   id           String   @id @default(uuid())
   username     String   @unique
   email        String   @unique
-  passwordHash String
+  passwordHash String?
+  casdoorId    String?  @unique
   createdBy    String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  @@index([casdoorId])
 }
 
 model Ticket {

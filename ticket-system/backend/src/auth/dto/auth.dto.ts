@@ -27,3 +27,13 @@ export class LogoutDto {
   @IsNotEmpty()
   refreshToken: string;
 }
+
+export class CasdoorCallbackDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Casdoor code 不能为空' })
+  code: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Casdoor state 不能为空' })
+  state: string;
+}

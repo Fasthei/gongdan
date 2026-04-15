@@ -11,6 +11,7 @@ import './i18n';
 // 懒加载页面
 const CustomerLogin = React.lazy(() => import('./pages/CustomerLogin'));
 const StaffLogin = React.lazy(() => import('./pages/StaffLogin'));
+const AuthCallback = React.lazy(() => import('./pages/AuthCallback'));
 const CustomerTicketList = React.lazy(() => import('./pages/customer/TicketList'));
 const CustomerTicketDetail = React.lazy(() => import('./pages/customer/TicketDetail'));
 const CustomerCreateTicket = React.lazy(() => import('./pages/customer/CreateTicket'));
@@ -76,6 +77,7 @@ function App() {
               {/* 公开路由 */}
               <Route path="/login" element={<CustomerLogin />} />
               <Route path="/staff/login" element={<StaffLogin />} />
+              <Route path="/staff/auth/callback" element={<AuthCallback />} />
               <Route path="/status-board" element={<StatusBoard />} />
               <Route path="/service-content" element={<ServiceContent />} />
               <Route path="/" element={<Navigate to="/login" replace />} />

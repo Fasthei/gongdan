@@ -43,6 +43,12 @@ const enUS = {
     staffLoginLink: 'Staff / Engineer Login',
     customerLoginLink: 'Customer Login',
     viewStatusBoard: 'View Service Dashboard (No Login Required)',
+    casdoorLogin: 'Sign in with Unified Auth Center',
+    casdoorHint: 'You will be redirected to the Unified Auth Center to complete sign-in',
+    callbackProcessing: 'Completing Unified Auth Center sign-in, please wait…',
+    callbackMissingParams: 'Callback parameters missing, sign-in not completed',
+    callbackStateMismatch: 'Session state verification failed, please sign in again',
+    backToLogin: 'Back to login',
   },
 
   // === Ticket Status ===
