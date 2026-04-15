@@ -63,7 +63,10 @@ export class AuthService {
     }
 
     // engineer / admin
-    const eng = await this.upsertEngineer(user, mapped);
+    if (mapped.role === 'OPERATOR') {
+      throw new UnauthorizedException('角色映射异常');
+    }
+    const eng = await this.upsertEngineer(user, { role: mapped.role, level: mapped.level });
     const payload = { sub: eng.id, role: eng.role, engineerLevel: eng.level };
     return this.signTokens(payload, {
       id: eng.id,
