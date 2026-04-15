@@ -96,6 +96,20 @@ export class AuthService {
         });
       }
     }
+    // 2b. 回退：按 username 绑定
+    if (!eng) {
+      const byName = await this.prisma.engineer.findUnique({ where: { username: user.name } });
+      if (byName) {
+        eng = await this.prisma.engineer.update({
+          where: { id: byName.id },
+          data: {
+            casdoorId: user.sub,
+            role: mapped.role,
+            level: mapped.level ?? byName.level,
+          },
+        });
+      }
+    }
     // 3. 自动建档
     if (!eng) {
       const email = user.email || `${user.name}@casdoor.local`;
@@ -126,6 +140,15 @@ export class AuthService {
       if (byEmail) {
         op = await this.prisma.operator.update({
           where: { id: byEmail.id },
+          data: { casdoorId: user.sub },
+        });
+      }
+    }
+    if (!op) {
+      const byName = await this.prisma.operator.findUnique({ where: { username: user.name } });
+      if (byName) {
+        op = await this.prisma.operator.update({
+          where: { id: byName.id },
           data: { casdoorId: user.sub },
         });
       }
