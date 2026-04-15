@@ -144,8 +144,11 @@ export class CasdoorService {
    *   engineer-l1 / engineer → Engineer(role=ENGINEER, level=L1)
    */
   mapRole(user: CasdoorUserInfo): MappedRole {
+    // Casdoor group 格式通常为 "built-in/admin" 或 "gongdan-admin"，统一规整
     const labels = [...(user.groups || []), ...(user.roles || [])]
-      .map(x => (x || '').toLowerCase().replace(/^gongdan[-_]/, ''));
+      .map(x => (x || '').toLowerCase())
+      .map(x => x.includes('/') ? x.split('/').pop()! : x)        // 去掉 org 前缀
+      .map(x => x.replace(/^gongdan[-_]/, ''));                    // 去掉 gongdan 前缀
 
     if (labels.includes('admin')) {
       return { type: 'engineer', role: 'ADMIN', level: 'L3' };
