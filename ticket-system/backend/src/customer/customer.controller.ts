@@ -1,4 +1,4 @@
-import { Controller, Post, Patch, Get, Body, Param, UseGuards, Request } from '@nestjs/common';
+import { Controller, Post, Patch, Get, Delete, Body, Param, UseGuards, Request } from '@nestjs/common';
 import { CustomerService } from './customer.service';
 import { CreateCustomerDto, UpdateCustomerTierDto, BindEngineerDto } from './dto/customer.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -38,5 +38,11 @@ export class CustomerController {
   @Roles('OPERATOR')
   bindEngineer(@Param('id') id: string, @Body() dto: BindEngineerDto, @Request() req: any) {
     return this.customerService.bindEngineer(id, dto.engineerId, req.user.id);
+  }
+
+  @Delete(':id')
+  @Roles('OPERATOR')
+  remove(@Param('id') id: string, @Request() req: any) {
+    return this.customerService.remove(id, req.user.id);
   }
 }

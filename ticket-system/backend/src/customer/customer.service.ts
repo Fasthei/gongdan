@@ -35,7 +35,7 @@ export class CustomerService {
   }
 
   async updateTier(customerId: string, dto: UpdateCustomerTierDto, operatorId: string) {
-    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    const customer = await this.prisma.customer.findFirst({ where: { id: customerId, deletedAt: null } });
     if (!customer) throw new NotFoundException('客户不存在');
 
     const sla = getSlaConfig(dto.tier as any);
@@ -51,7 +51,7 @@ export class CustomerService {
   }
 
   async bindEngineer(customerId: string, engineerId: string, operatorId: string) {
-    const customer = await this.prisma.customer.findUnique({ where: { id: customerId } });
+    const customer = await this.prisma.customer.findFirst({ where: { id: customerId, deletedAt: null } });
     if (!customer) throw new NotFoundException('客户不存在');
     const engineer = await this.prisma.engineer.findUnique({ where: { id: engineerId } });
     if (!engineer) throw new NotFoundException('工程师不存在');
@@ -62,18 +62,31 @@ export class CustomerService {
     });
   }
 
+  async remove(customerId: string, operatorId: string) {
+    const customer = await this.prisma.customer.findFirst({ where: { id: customerId, deletedAt: null } });
+    if (!customer) throw new NotFoundException('客户不存在');
+
+    return this.prisma.customer.update({
+      where: { id: customerId },
+      data: { deletedAt: new Date() },
+    });
+  }
+
   async findAll() {
-    return this.prisma.customer.findMany({ orderBy: { createdAt: 'desc' } });
+    return this.prisma.customer.findMany({
+      where: { deletedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   async findOne(id: string) {
-    const customer = await this.prisma.customer.findUnique({ where: { id } });
+    const customer = await this.prisma.customer.findFirst({ where: { id, deletedAt: null } });
     if (!customer) throw new NotFoundException('客户不存在');
     return customer;
   }
 
   async findByCode(customerCode: string) {
-    const customer = await this.prisma.customer.findUnique({ where: { customerCode } });
+    const customer = await this.prisma.customer.findFirst({ where: { customerCode, deletedAt: null } });
     if (!customer) throw new NotFoundException('客户编号无效');
     return customer;
   }

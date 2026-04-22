@@ -76,12 +76,14 @@ model Customer {
   createdBy        String
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
 
   tickets          Ticket[]
   boundEngineer    Engineer?    @relation("BoundEngineer", fields: [boundEngineerId], references: [id])
 
   @@index([customerCode])
   @@index([tier])
+  @@index([deletedAt])
 }
 
 model Engineer {

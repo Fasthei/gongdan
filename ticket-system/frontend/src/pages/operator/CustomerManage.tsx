@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Modal, Form, Input, Select, message, Tag, Space } from 'antd';
+import { Table, Button, Modal, Form, Input, Select, message, Tag, Space, Popconfirm } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import api from '../../api/axios';
 
@@ -67,6 +67,16 @@ export default function CustomerManage() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    try {
+      await api.delete(`/customers/${id}`);
+      message.success('客户已删除');
+      fetchData();
+    } catch (err: any) {
+      message.error(err.response?.data?.message || '删除失败');
+    }
+  };
+
   const columns = [
     { title: '客户编号', dataIndex: 'customerCode', width: 160 },
     { title: '客户名称', dataIndex: 'name' },
@@ -83,7 +93,7 @@ export default function CustomerManage() {
       },
     },
     {
-      title: '操作', key: 'action', width: 200,
+      title: '操作', key: 'action', width: 280,
       render: (_: any, r: any) => (
         <Space>
           <Button size="small" onClick={() => { setTierModal({ open: true, customerId: r.id }); tierForm.setFieldsValue({ tier: r.tier }); }}>
@@ -92,6 +102,16 @@ export default function CustomerManage() {
           <Button size="small" onClick={() => { setBindModal({ open: true, customerId: r.id }); bindForm.resetFields(); }}>
             绑工程师
           </Button>
+          <Popconfirm
+            title="确认删除该客户？"
+            description="删除后该客户将无法登录，其历史工单仍会保留。"
+            okText="删除"
+            okButtonProps={{ danger: true }}
+            cancelText="取消"
+            onConfirm={() => handleDelete(r.id)}
+          >
+            <Button size="small" danger>删除</Button>
+          </Popconfirm>
         </Space>
       ),
     },
