@@ -47,14 +47,15 @@ export default function OperatorCreateTicket() {
   };
 
   const onFinish = async (values: any) => {
-    const { customerId, ...rest } = values;
+    const { customerId, contactEmail, contactPhone, ...rest } = values;
     if (!customerId) {
       message.error('请选择客户');
       return;
     }
     setLoading(true);
     try {
-      const payload = { ...rest, attachmentUrls };
+      const contactInfo = contactPhone ? `${contactEmail} / ${contactPhone}` : contactEmail;
+      const payload = { ...rest, contactInfo, attachmentUrls };
       await api.post(`/tickets/for-customer/${customerId}`, payload);
       message.success('工单已提交');
       navigate('/operator');
@@ -145,9 +146,23 @@ export default function OperatorCreateTicket() {
             </Select>
           </Form.Item>
 
-          <Form.Item name="contactInfo" label="联系方式（选填）"
-            rules={[{ pattern: /^[\w.-]+@[\w.-]+\.\w+$|^1[3-9]\d{9}$/, message: '请输入有效的邮箱或手机号' }]}>
-            <Input placeholder="邮箱或手机号" />
+          <Form.Item
+            name="contactEmail"
+            label="联系邮箱"
+            rules={[
+              { required: true, message: '请填写联系邮箱' },
+              { type: 'email', message: '请输入有效的邮箱地址' },
+            ]}
+          >
+            <Input placeholder="如：user@company.com" />
+          </Form.Item>
+
+          <Form.Item
+            name="contactPhone"
+            label="联系手机（选填）"
+            rules={[{ pattern: /^1[3-9]\d{9}$/, message: '请输入有效的手机号' }]}
+          >
+            <Input placeholder="如：13800000000" />
           </Form.Item>
 
           <Form.Item label="上传附件（选填）">
