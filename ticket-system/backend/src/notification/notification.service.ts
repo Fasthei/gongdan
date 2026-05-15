@@ -49,20 +49,33 @@ export class NotificationService {
       return;
     }
 
-    const messageMap: Record<string, string> = {
-      'ticket.created':         `📋 新工单 ${event.ticketNumber} 已创建，等待受理`,
-      'ticket.assigned':        `👷 工单 ${event.ticketNumber} 已分配给工程师`,
-      'ticket.status_changed':  `🔄 工单 ${event.ticketNumber} 状态已更新`,
-      'ticket.close_requested': `⏳ 工单 ${event.ticketNumber} 申请关闭，等待运营审批`,
-      'ticket.closed':          `✅ 工单 ${event.ticketNumber} 已关闭`,
+    const frontendUrl = this.config.get<string>('FRONTEND_URL') || 'http://localhost:5173';
+    const ticketUrl = `${frontendUrl}/engineer/tickets/${event.ticketId}`;
+
+    const messageMap: Record<string, (payload: any) => string> = {
+      'ticket.created': (p) =>
+        `📋 新工单 ${event.ticketNumber} 已创建\n` +
+        `客户：${p.customerName} (${p.customerCode})\n` +
+        `[查看详情](${ticketUrl})`,
+      'ticket.assigned': () =>
+        `👷 工单 ${event.ticketNumber} 已分配给工程师\n[查看详情](${ticketUrl})`,
+      'ticket.status_changed': () =>
+        `🔄 工单 ${event.ticketNumber} 状态已更新\n[查看详情](${ticketUrl})`,
+      'ticket.close_requested': () =>
+        `⏳ 工单 ${event.ticketNumber} 申请关闭，等待运营审批\n[查看详情](${ticketUrl})`,
+      'ticket.closed': () =>
+        `✅ 工单 ${event.ticketNumber} 已关闭\n[查看详情](${ticketUrl})`,
     };
+
+    const textBuilder = messageMap[event.type];
+    const text = textBuilder ? textBuilder(event.payload) : `${event.type}: ${event.ticketNumber}`;
 
     try {
       await axios.post(webhookUrl, {
         '@type': 'MessageCard',
         '@context': 'http://schema.org/extensions',
-        summary: messageMap[event.type] || event.type,
-        text: messageMap[event.type] || event.type,
+        summary: text.split('\n')[0],
+        text,
       });
     } catch (err) {
       this.logger.error(`Teams 通知发送失败: ${err.message}`);

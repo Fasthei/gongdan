@@ -99,6 +99,8 @@ export class TicketService {
       ticketNumber: createdTicket.ticketNumber,
       payload: {
         customerId: createdTicket.customerId,
+        customerName: createdTicket.customer.name,
+        customerCode: customer.customerCode,
         createdByRole: createdTicket.createdByRole,
         priority: createdTicket.priority,
       },
@@ -144,6 +146,7 @@ export class TicketService {
         slaDeadline,
         engineerLevel: dto.requestedLevel as any,
       },
+      include: { customer: { select: { name: true, tier: true } } },
     });
 
     await this.notificationService.publishEvent({
@@ -152,6 +155,8 @@ export class TicketService {
       ticketNumber: createdTicket.ticketNumber,
       payload: {
         customerId: createdTicket.customerId,
+        customerName: createdTicket.customer.name,
+        customerCode: customer.customerCode,
         createdByRole: createdTicket.createdByRole,
         priority: createdTicket.priority,
       },
