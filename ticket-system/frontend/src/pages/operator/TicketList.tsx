@@ -150,7 +150,13 @@ export default function OperatorTicketList() {
             <Select.Option value="POSTSALES">售后</Select.Option>
           </Select>
           <Badge count={tickets.filter(t => t.status === 'PENDING_CLOSE').length} offset={[4, 0]}>
-            <span style={{ color: '#faad14', fontWeight: 500, marginLeft: 8 }}>待审批关闭</span>
+            <Button
+              type="link"
+              style={{ color: '#faad14', fontWeight: 500, padding: 0 }}
+              onClick={() => setStatusFilter('PENDING_CLOSE')}
+            >
+              待审批关闭
+            </Button>
           </Badge>
         </Space>
       </Space>

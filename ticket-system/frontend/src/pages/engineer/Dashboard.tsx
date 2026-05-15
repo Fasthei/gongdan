@@ -82,12 +82,19 @@ function EngineerSettings() {
   const [pwdLoading, setPwdLoading] = React.useState(false);
   const { t } = useTranslation();
 
+  React.useEffect(() => {
+    api.get('/engineers/me').then(({ data }) => {
+      if (data?.email) setForm({ email: data.email });
+    }).catch(() => {});
+  }, []);
+
   const handleSave = async () => {
     if (!form.email) return message.warning(t('engineerSettings.emailPlaceholder'));
     setLoading(true);
     try {
       await api.patch('/engineers/me/email', { email: form.email });
       message.success(t('engineerSettings.emailSuccess'));
+      setForm({ email: form.email });
     } catch (err: any) {
       message.error(err.response?.data?.message || t('engineerSettings.emailFailed'));
     } finally {

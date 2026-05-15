@@ -66,6 +66,43 @@ export class EngineerService {
     return { success: true };
   }
 
+  async getProfile(engineerId: string) {
+    return this.prisma.engineer.findUnique({
+      where: { id: engineerId },
+      select: { id: true, username: true, email: true, level: true, role: true, isAvailable: true },
+    });
+  }
+
+  async getOperatorProfile(operatorId: string) {
+    return this.prisma.operator.findUnique({
+      where: { id: operatorId },
+      select: { id: true, username: true, email: true },
+    });
+  }
+
+  async updateOperatorEmail(operatorId: string, dto: UpdateEngineerEmailDto) {
+    return this.prisma.operator.update({
+      where: { id: operatorId },
+      data: { email: dto.email },
+      select: { id: true, username: true, email: true },
+    });
+  }
+
+  async changeOperatorPassword(operatorId: string, dto: ChangePasswordDto) {
+    const operator = await this.prisma.operator.findUnique({ where: { id: operatorId } });
+    if (!operator) throw new NotFoundException('运营账户不存在');
+
+    const valid = await bcrypt.compare(dto.oldPassword, operator.passwordHash);
+    if (!valid) throw new ConflictException('旧密码错误');
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await this.prisma.operator.update({
+      where: { id: operatorId },
+      data: { passwordHash },
+    });
+    return { success: true };
+  }
+
   async createOperator(dto: CreateOperatorDto, adminId: string) {
     const existing = await this.prisma.operator.findUnique({ where: { username: dto.username } });
     if (existing) throw new ConflictException('运营用户名已存在');

@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { EngineerService } from './engineer.service';
-import { EngineerController } from './engineer.controller';
+import { EngineerController, OperatorController } from './engineer.controller';
 
 @Module({
   providers: [EngineerService],
-  controllers: [EngineerController],
+  controllers: [EngineerController, OperatorController],
   exports: [EngineerService],
 })
 export class EngineerModule {}

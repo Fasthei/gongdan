@@ -49,6 +49,12 @@ export class EngineerController {
     return this.engineerService.changePassword(req.user.id, dto);
   }
 
+  @Get('me')
+  @Roles('ENGINEER', 'ADMIN')
+  getMyProfile(@Request() req: any) {
+    return this.engineerService.getProfile(req.user.id);
+  }
+
   @Post('operators')
   @Roles('ADMIN')
   createOperator(@Body() dto: CreateOperatorDto, @Request() req: any) {
@@ -101,5 +107,29 @@ export class EngineerController {
   @Roles('ADMIN')
   deleteOperatorByAdmin(@Param('id') id: string) {
     return this.engineerService.deleteOperatorByAdmin(id);
+  }
+}
+
+@Controller('operators')
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class OperatorController {
+  constructor(private engineerService: EngineerService) {}
+
+  @Get('me')
+  @Roles('OPERATOR')
+  getMyProfile(@Request() req: any) {
+    return this.engineerService.getOperatorProfile(req.user.id);
+  }
+
+  @Patch('me/email')
+  @Roles('OPERATOR')
+  updateEmail(@Body() dto: UpdateEngineerEmailDto, @Request() req: any) {
+    return this.engineerService.updateOperatorEmail(req.user.id, dto);
+  }
+
+  @Patch('me/password')
+  @Roles('OPERATOR')
+  changePassword(@Body() dto: ChangePasswordDto, @Request() req: any) {
+    return this.engineerService.changeOperatorPassword(req.user.id, dto);
   }
 }
